@@ -31,6 +31,12 @@ class Recorder:
         self.file: Path | None = None
         self.client: str | None = None
         self.cfg: dict = {}
+        # Where ffmpeg's stderr goes. Without these the first failure raises an
+        # AttributeError inside the failure handler, which is the worst possible
+        # moment to discover an attribute is missing.
+        self.log_file: Path | None = None
+        self._log_fh = None
+        self._retrying = False
         self.on_change = on_change or (lambda: None)
         self.on_message = on_message or (lambda title, body: None)
 
@@ -60,7 +66,11 @@ class Recorder:
             return
 
         device = cfg.get("audio_device") or ""
-        if not device:
+        # "-" means: record the screen with no audio at all. Set by the retry
+        # after a microphone took the whole command down with it.
+        if device == "-":
+            device = ""
+        elif not device:
             found = config.audio_devices()
             if found:
                 device = found[0]
@@ -102,10 +112,25 @@ class Recorder:
                    "-ac", "1", "-ar", "16000", "-c:a", "aac", "-b:a", "64k",
                    "-y", str(self.file)]
 
+        # ffmpeg's stderr was going to DEVNULL, so when a recording died on
+        # startup there was nothing to look at — the app just stopped. It is
+        # the only thing that ever says WHY, so it goes to a file next to the
+        # recordings, named after it.
+        log_dir = out_dir / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        self.log_file = log_dir / (name + ".log")
+        try:
+            self._log_fh = self.log_file.open("wb")
+            self._log_fh.write(("cmd: " + " ".join(cmd) + "\n\n").encode())
+            self._log_fh.flush()
+        except OSError:
+            self._log_fh = None
+
         try:
             self.proc = subprocess.Popen(
                 cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, creationflags=config.NO_WINDOW)
+                stderr=(self._log_fh or subprocess.DEVNULL),
+                creationflags=config.NO_WINDOW)
         except OSError as e:
             self.on_message("Could not start recording", str(e))
             self.file = None
@@ -137,7 +162,58 @@ class Recorder:
             p.wait(timeout=600)
         except subprocess.TimeoutExpired:
             p.kill()
+
+        try:
+            if self._log_fh:
+                self._log_fh.close()
+        except OSError:
+            pass
+
+        # A recording that ends the instant it starts did not record anything;
+        # it failed. Saying "saved" and handing the pipeline an empty file is
+        # how this looked like a mystery instead of an error.
+        ran = (dt.datetime.now() - self.started_at).total_seconds() if self.started_at else 0
+        if p.returncode not in (0, 255) or ran < 1.5:
+            self._failed_to_start(ran)
+            return
         self._finish()
+
+    def _failed_to_start(self, ran: float) -> None:
+        """Report the reason ffmpeg gave, and retry the screen without audio.
+
+        A microphone that cannot be opened — blocked by Windows, or held by
+        another app — takes the WHOLE command down, so the screen capture dies
+        with it. The screen needs no permission and would have worked alone,
+        so losing it to a microphone problem is the wrong trade."""
+        reason = ""
+        try:
+            if self.log_file and self.log_file.exists():
+                lines = [ln for ln in self.log_file.read_text(
+                    encoding="utf-8", errors="replace").splitlines() if ln.strip()]
+                reason = lines[-1][:160] if lines else ""
+        except OSError:
+            pass
+
+        mode, client, cfg = self.mode, self.client, self.cfg
+        self.proc = self.file = self.started_at = None
+        self.on_change()
+
+        if mode == "screen" and not getattr(self, "_retrying", False):
+            self._retrying = True
+            self.on_message("Recording the screen without audio",
+                            reason or "The microphone could not be opened.")
+            try:
+                cfg2 = dict(cfg or {})
+                cfg2["audio_device"] = "-"        # sentinel: skip audio entirely
+                self.start(mode, client, cfg2)
+            finally:
+                self._retrying = False
+            return
+
+        self.on_message(
+            "Recording stopped immediately",
+            (reason or "ffmpeg exited straight away.")
+            + f"\n\nFull log: {self.log_file}")
 
     def _finish(self) -> None:
         recorded, tag, cfg = self.file, self.client, self.cfg

@@ -426,6 +426,13 @@ class MaestroBar:
         self.install_hotkey()
 
     # -- tray --------------------------------------------------------------
+    def open_logs(self) -> None:
+        """The folder with one ffmpeg log per recording. When a recording ends
+        the moment it starts, the newest file here says why."""
+        d = config.expand(self.cfg.get("out_dir", "~/Recordings")) / "logs"
+        d.mkdir(parents=True, exist_ok=True)
+        os.startfile(str(d))  # noqa: S606 — a folder we just created
+
     def retry_unsent(self) -> None:
         """Push anything that could not be delivered — no token yet, no network,
         S3 refused. The media is still on disk; only the delivery failed, and a
@@ -453,6 +460,7 @@ class MaestroBar:
         m.addAction(QAction("Check setup", m, triggered=self.check_setup))
         m.addSeparator()
         m.addAction(QAction("Open recordings", m, triggered=self.open_recordings))
+        m.addAction(QAction("Open logs", m, triggered=self.open_logs))
         m.addAction(QAction("Retry unsent recordings", m, triggered=self.retry_unsent))
         m.addAction(QAction("Reload config", m, triggered=self.reload))
         m.addSeparator()
