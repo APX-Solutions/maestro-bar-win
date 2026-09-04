@@ -175,6 +175,54 @@ def audio_devices() -> list[str]:
     return list(dict.fromkeys(names))
 
 
+def device_opens(name: str, timeout: float = 8.0) -> bool:
+    """Can ffmpeg actually open this microphone right now?
+
+    Listed and usable are different things. Tamara's machine offers her AirPods
+    first and the built-in mic second; the AirPods are listed even when Windows
+    is holding them as "Find My" rather than as a live input, so opening them
+    fails and ffmpeg exits instantly — taking the whole recording with it.
+
+    Half a second of audio to nowhere answers the question that a device list
+    cannot."""
+    exe = ffmpeg_path()
+    if not exe or not name:
+        return False
+    try:
+        r = subprocess.run(
+            [exe, "-hide_banner", "-loglevel", "error",
+             "-f", "dshow", "-i", f"audio={name}", "-t", "0.5", "-f", "null", "-"],
+            capture_output=True, timeout=timeout,
+            creationflags=NO_WINDOW, errors="replace")
+        return r.returncode == 0
+    except Exception:  # noqa: BLE001 — a probe that hangs is a device to avoid
+        return False
+
+
+_working_device: str | None = None
+
+
+def pick_audio_device(preferred: str = "") -> str:
+    """The first microphone that actually works, remembered for the session.
+
+    Taking devices[0] blindly is what broke this: the list is ordered by
+    Windows, not by usefulness, and a disconnected headset can sit at the top.
+
+    A device the user chose explicitly is honoured without probing — it is
+    their machine and their call, and a probe that wrongly fails would silently
+    override them."""
+    global _working_device
+    if preferred:
+        return preferred
+    if _working_device:
+        return _working_device
+    for name in audio_devices():
+        if device_opens(name):
+            _working_device = name
+            return name
+    return ""
+
+
 # --- privacy, the Windows way ------------------------------------------------
 #
 # There is no TCC here, so nothing to request: the microphone is a per-machine

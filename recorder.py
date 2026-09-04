@@ -71,9 +71,13 @@ class Recorder:
         if device == "-":
             device = ""
         elif not device:
-            found = config.audio_devices()
-            if found:
-                device = found[0]
+            # Not devices[0]. That list is ordered by Windows, not by what
+            # works: a headset that is listed but not connected can sit at the
+            # top, and opening it kills the recording the instant it starts.
+            # pick_audio_device probes until one actually opens.
+            device = config.pick_audio_device()
+            if device:
+                pass
             elif mode != "screen":
                 # Two very different causes, and the message used to blame the
                 # hardware for both. Windows never prompts for the microphone,
