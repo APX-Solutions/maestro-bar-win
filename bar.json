@@ -1,0 +1,97 @@
+{
+  "api": "https://maestro-agent.duckdns.org",
+  "token_service": "maestro-token",
+  "audio_device": "",
+  "out_dir": "~/Recordings",
+  "after_record": {
+    "cmd": "",
+    "auto_push": true,
+    "notify": true
+  },
+  "sidebar": {
+    "enabled": true,
+    "hotkey": "<ctrl>+<alt>+m",
+    "edge": "right",
+    "width": 44,
+    "flyout_width": 330,
+    "refresh_seconds": 90,
+    "record": [
+      {
+        "mode": "audio",
+        "label": "Record audio"
+      },
+      {
+        "mode": "screen",
+        "label": "Record screen and audio"
+      }
+    ],
+    "sections": [
+      {
+        "id": "review",
+        "title": "Review",
+        "symbol": "tray.full",
+        "list": "/sales/actions?status=pending",
+        "fields": {
+          "title": [
+            "title",
+            "action_label"
+          ],
+          "subtitle": [
+            "client_name",
+            "meeting_title"
+          ],
+          "body": [
+            "draft_body",
+            "detail"
+          ]
+        },
+        "actions": [
+          {
+            "label": "Done",
+            "method": "PATCH",
+            "path": "/sales/actions/{id}",
+            "body": {
+              "status": "done"
+            },
+            "toast": "Marked done"
+          },
+          {
+            "label": "Dismiss",
+            "method": "PATCH",
+            "path": "/sales/actions/{id}",
+            "body": {
+              "status": "dismissed"
+            },
+            "toast": "Dismissed"
+          },
+          {
+            "label": "Send the email",
+            "path": "/sales/actions/{id}/send",
+            "toast": "Sent"
+          }
+        ],
+        "compose": {
+          "path": "/sales/actions/{id}/instruct",
+          "field": "instruction",
+          "placeholder": "Tell the agent what to change",
+          "record": false,
+          "toast": "Instruction sent"
+        }
+      },
+      {
+        "id": "capture",
+        "title": "Capture",
+        "symbol": "square.and.pencil",
+        "list": "",
+        "actions": [],
+        "compose": {
+          "path": "",
+          "file": "~/Recordings/captures.md",
+          "placeholder": "Idea, decision, ticket",
+          "record": true,
+          "toast": "Captured"
+        }
+      }
+    ]
+  }
+}

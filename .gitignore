@@ -1,0 +1,8 @@
+# Rebuilt or refetched, never versioned.
+.venv/
+vendor/          # ffmpeg.exe, ~110MB, fetched by vendor_ffmpeg.py
+__pycache__/
+*.pyc
+dist/
+build/
+*.spec

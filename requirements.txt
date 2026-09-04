@@ -1,0 +1,11 @@
+PySide6>=6.6
+requests>=2.31
+keyring>=24
+pynput>=1.7
+
+# faster-whisper is NOT required any more. Recordings upload as media and
+# Maestro reads them server-side, so nothing here transcribes. It stays
+# commented rather than deleted because push.py (the older /meetings/ingest
+# path) still uses it if anyone runs that by hand — and because installing a
+# speech model on every laptop is exactly what this stopped needing.
+# faster-whisper>=1.0
