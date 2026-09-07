@@ -56,7 +56,11 @@ def token(cfg: dict) -> str:
     f = Path.home() / ".maestro" / "token"
     try:
         if f.is_file():
-            t = f.read_text(encoding="utf-8").strip()
+            # utf-8-SIG, not utf-8: Notepad saves UTF-8 with a byte order mark,
+            # and ﻿ is not whitespace, so .strip() leaves it on the front
+            # of the token. The request then fails as "invalid token" while the
+            # file on disk looks exactly right.
+            t = f.read_text(encoding="utf-8-sig").strip()
             if t:
                 return t
     except OSError:
