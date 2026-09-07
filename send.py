@@ -80,6 +80,20 @@ def token(cfg: dict) -> str:
         return ""
 
 
+def page_url_for(media: Path) -> str:
+    """The page URL captured before recording, kept beside the media.
+
+    A sidecar rather than a field on the queue: the queue is a list of paths and
+    a failed send re-reads it later, possibly after a restart. Writing the URL
+    next to the file it belongs to means one source of truth, and no queue
+    format to migrate."""
+    f = media.with_suffix(media.suffix + ".url")
+    try:
+        return f.read_text(encoding="utf-8-sig").strip() if f.is_file() else ""
+    except OSError:
+        return ""
+
+
 def send(path: str | Path, cfg: dict, client: str = "") -> tuple[bool, str]:
     """Upload the media and have Maestro read it. Returns (ok, message)."""
     p = Path(path)
@@ -129,13 +143,21 @@ def send(path: str | Path, cfg: dict, client: str = "") -> tuple[bool, str]:
     # 3. tell Maestro to read it
     try:
         r = requests.post(f"{base}/recordings/ingest", headers=head,
-                          json={"key": key, "kind": kind, "client": client or ""},
+                          json={"key": key, "kind": kind, "client": client or "",
+                                "page_url": page_url_for(p)},
                           timeout=TIMEOUT_INGEST)
         r.raise_for_status()
         out = r.json()
     except Exception as e:
         _queue(cfg, p)
         return False, f"Maestro could not read it ({str(e)[:60]}) — recording kept"
+
+    # Read, so the note has served its purpose. Left behind it would attach the
+    # wrong page to nothing in particular and clutter the folder.
+    try:
+        p.with_suffix(p.suffix + ".url").unlink(missing_ok=True)
+    except OSError:
+        pass
 
     routed = out.get("routed")
     cat = out.get("category") or "?"

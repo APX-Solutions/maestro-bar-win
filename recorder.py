@@ -54,7 +54,8 @@ class Recorder:
     def toggle(self, mode: str, cfg: dict, client: str | None = None) -> None:
         self.stop() if self.is_recording else self.start(mode, cfg, client)
 
-    def start(self, mode: str, cfg: dict, client: str | None = None) -> None:
+    def start(self, mode: str, cfg: dict, client: str | None = None,
+              page_url: str = "") -> None:
         if self.is_recording:
             return
         exe = config.ffmpeg_path()
@@ -102,6 +103,19 @@ class Recorder:
         if client:
             name += "-" + _slug(client)
         self.file = out_dir / (name + (".mp4" if mode == "screen" else ".m4a"))
+        # Written now, while the answer is in hand, rather than at the end:
+        # a crash mid-recording still leaves the page beside the media, and
+        # send.py reads it from there on the first try or on a retry days
+        # later. Cleared first so a skipped prompt cannot inherit the URL
+        # from the previous recording.
+        self.page_url = (page_url or "").strip()
+        try:
+            side = self.file.with_suffix(self.file.suffix + ".url")
+            side.unlink(missing_ok=True)
+            if self.page_url:
+                side.write_text(self.page_url, encoding="utf-8")
+        except OSError:
+            pass  # a note we could not write is not worth losing a recording over
 
         if mode == "screen":
             cmd = [exe, "-hide_banner", "-loglevel", "error",
@@ -221,6 +235,7 @@ class Recorder:
 
     def _finish(self) -> None:
         recorded, tag, cfg = self.file, self.client, self.cfg
+        self.page_url = ""  # send.py reads it from the sidecar, not from here
         self.proc = None
         self.started_at = None
         self.file = None

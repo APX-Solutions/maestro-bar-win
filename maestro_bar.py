@@ -645,8 +645,43 @@ class MaestroBar:
                 sid, len(api.rows(payload)) if code == 200 else 0))
 
     # -- recording ---------------------------------------------------------
+    def ask_page_url(self) -> str:
+        """Where the bug is, asked once before capture starts.
+
+        A screen recording shows the page but not dependably its address — the
+        URL bar is small, often cropped, and the model reads what was SAID. So
+        the one fact a recording cannot carry is asked for directly.
+
+        Prefilled from the clipboard when it holds a URL, which it usually does:
+        someone reporting a page bug copied the address on the way here. That
+        turns the prompt into a single Enter.
+
+        Skipping is a real answer, not a failure. Escape, Cancel, or an empty
+        box all record with no URL. Nothing here can stop a recording.
+        """
+        clip = ""
+        try:
+            clip = (QApplication.clipboard().text() or "").strip()
+        except Exception:  # noqa: BLE001 — no clipboard is not a reason to refuse
+            clip = ""
+        if not clip.lower().startswith(("http://", "https://")) or len(clip) > 2000:
+            clip = ""
+        try:
+            text, ok = QInputDialog.getText(
+                None, "Where is this?",
+                "Paste the page URL, or press Escape to skip:", text=clip)
+        except Exception:  # noqa: BLE001
+            return ""
+        return (text or "").strip() if ok else ""
+
     def toggle_record(self, mode: str):
-        self.recorder.toggle(mode, self.cfg)
+        # Only when starting. Asking on the way out would put the dialog in
+        # front of someone trying to stop, and the recording keeps rolling
+        # while they read it.
+        if self.recorder.is_recording:
+            self.recorder.stop()
+            return
+        self.recorder.start(mode, self.cfg, page_url=self.ask_page_url())
 
     def toggle_audio(self):
         self.toggle_record("audio")
