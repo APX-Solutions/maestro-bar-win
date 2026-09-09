@@ -38,7 +38,13 @@ DEST = HERE / "vendor" / "ffmpeg.exe"
 # gyan.dev kept as the fallback rather than dropped — two independent hosts fail
 # together far less often than one fails alone.
 URLS = [
-    "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip",
+    # releases/download/LATEST — the rolling tag literally named "latest",
+    # whose asset names are stable. NOT releases/latest/download, which means
+    # "the newest release": BtbN publishes autobuilds hourly under names like
+    # ffmpeg-N-126482-g903325e279-win64-gpl.zip, so the moment one lands the
+    # stable filename is not in the newest release and every download 404s.
+    # It worked when tested and broke ninety minutes later, on someone's install.
+    "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
     "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
 ]
 ATTEMPTS_PER_URL = 3
