@@ -16,6 +16,7 @@ not a formality: they stop a broken build being packaged and handed out.
 from __future__ import annotations
 
 import subprocess
+import time
 import sys
 import urllib.request
 import zipfile
@@ -24,9 +25,23 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 DEST = HERE / "vendor" / "ffmpeg.exe"
 
-# gyan.dev's essentials build: static, no DLLs, the smallest one that still has
-# gdigrab and dshow. Both are required — gdigrab is the screen, dshow is the mic.
-URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+# Static Windows builds carrying gdigrab and dshow — both required, gdigrab is
+# the screen and dshow is the microphone.
+#
+# More than one, in this order, because a single source is a single point of
+# failure and this one failed on a colleague's first install:
+#
+#   HTTP Error 503: Service Unavailable
+#
+# gyan.dev is one person's server and rate-limits under load; BtbN's builds are
+# GitHub releases behind a CDN. GitHub goes first for that reason alone, with
+# gyan.dev kept as the fallback rather than dropped — two independent hosts fail
+# together far less often than one fails alone.
+URLS = [
+    "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip",
+    "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+]
+ATTEMPTS_PER_URL = 3
 
 
 def fetch(force: bool = False) -> Path:
@@ -41,25 +56,47 @@ def fetch(force: bool = False) -> Path:
     # It also printed nothing for the whole download, so on a slow link the
     # build looked hung. It is genuinely slow: this took over five minutes on a
     # normal connection, which is a thing to SAY rather than let someone guess.
-    print(f"==> downloading {URL}")
-    print("    ~110 MB, and gyan.dev is not fast — several minutes is normal.")
     tmp = DEST.parent / "ffmpeg-download.zip.part"
     tmp.parent.mkdir(parents=True, exist_ok=True)
+
+    # Try each host, a few times each, with a growing pause. A 503 is usually
+    # "not right now" rather than "never", and the whole setup used to die on
+    # the first one.
     got = 0
-    try:
-        # timeout here is per-read, not total: a slow but steady download is
-        # fine, a stalled one is not.
-        with urllib.request.urlopen(URL, timeout=120) as r, tmp.open("wb") as out:
-            total = int(r.headers.get("Content-Length") or 0)
-            while chunk := r.read(1 << 20):
-                out.write(chunk)
-                got += len(chunk)
-                if total:
-                    print(f"\r    {got / 1e6:6.0f} / {total / 1e6:.0f} MB", end="", flush=True)
-        print()
-    except Exception as e:
-        tmp.unlink(missing_ok=True)
-        raise SystemExit(f"download failed after {got / 1e6:.0f} MB: {e}")
+    last = ""
+    for url in URLS:
+        for attempt in range(1, ATTEMPTS_PER_URL + 1):
+            print(f"==> downloading {url}")
+            if attempt > 1:
+                print(f"    attempt {attempt} of {ATTEMPTS_PER_URL}")
+            print("    ~110-170 MB, and this is not fast — several minutes is normal.")
+            got = 0
+            try:
+                # timeout here is per-read, not total: a slow but steady
+                # download is fine, a stalled one is not.
+                with urllib.request.urlopen(url, timeout=120) as r, tmp.open("wb") as out:
+                    total = int(r.headers.get("Content-Length") or 0)
+                    while chunk := r.read(1 << 20):
+                        out.write(chunk)
+                        got += len(chunk)
+                        if total:
+                            print(f"\r    {got / 1e6:6.0f} / {total / 1e6:.0f} MB", end="", flush=True)
+                print()
+                break
+            except Exception as e:
+                last = f"{url}: {e}"
+                print(f"\n    failed after {got / 1e6:.0f} MB: {e}")
+                tmp.unlink(missing_ok=True)
+                if attempt < ATTEMPTS_PER_URL:
+                    time.sleep(5 * attempt)
+        if tmp.is_file() and tmp.stat().st_size > 0:
+            break
+    else:
+        raise SystemExit(f"could not download ffmpeg from any source. Last error — {last}\n"
+                         f"Install it by hand instead:  winget install Gyan.FFmpeg")
+    if not (tmp.is_file() and tmp.stat().st_size > 0):
+        raise SystemExit(f"could not download ffmpeg from any source. Last error — {last}\n"
+                         f"Install it by hand instead:  winget install Gyan.FFmpeg")
 
     try:
         with zipfile.ZipFile(tmp) as z:
