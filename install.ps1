@@ -60,16 +60,34 @@ Remove-Item -Force $zip -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $out -ErrorAction SilentlyContinue
 
 Write-Host "  Installed to $dest"
+
+# Start at login, with no console window.
+#
+# The first run below keeps its window on purpose — that is where setup errors
+# are readable. Every run after it is silent: pythonw has no console, and a
+# shortcut in Startup means nobody has to remember to launch anything or keep a
+# black window open. The venv it points at does not exist yet; the first run
+# creates it, and the shortcut is only used from the next login onwards.
+try {
+  $startup = [Environment]::GetFolderPath('Startup')
+  $lnk = Join-Path $startup 'Maestro Bar.lnk'
+  $w = New-Object -ComObject WScript.Shell
+  $sc = $w.CreateShortcut($lnk)
+  $sc.TargetPath       = Join-Path $dest '.venv\Scripts\pythonw.exe'
+  $sc.Arguments        = 'maestro_bar.py'
+  $sc.WorkingDirectory = $dest
+  $sc.Description      = 'Maestro Bar'
+  $sc.Save()
+  Write-Host "  Will start automatically when you log in."
+} catch {
+  Write-Host "  (could not add it to startup - not fatal, you can open it from $dest)"
+}
 Write-Host ""
 Write-Host "  Starting it now. The FIRST run takes a few minutes: it builds its own"
-Write-Host "  Python environment and downloads ffmpeg (~110 MB). That happens once."
+Write-Host "  Python environment and downloads ffmpeg (~110 MB). That happens once,"
+Write-Host "  and the window it opens can be closed as soon as the bar appears."
 Write-Host ""
-Write-Host "  Leave the black window open - closing it stops the app."
-Write-Host "  Press Ctrl+Alt+M to show and hide the bar."
-Write-Host ""
-Write-Host "  Then, from the icon near the clock: 'Check setup', and"
-Write-Host "  'Choose microphone...' - Windows names every mic differently and the"
-Write-Host "  app cannot guess yours. Skip it and recordings stop the second they start."
+Write-Host "  Press Ctrl+Alt+M to show and hide the bar. That is all you need to do."
 Write-Host ""
 Write-Host "  Later, to update: double-click update.bat in $dest"
 Write-Host ""
