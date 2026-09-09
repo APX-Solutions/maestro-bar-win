@@ -7,12 +7,23 @@ echo   Maestro Bar
 echo   ===========
 echo.
 
-where python >nul 2>&1
-if errorlevel 1 (
+REM "where python" also finds the Windows Store alias, which is not Python: it
+REM prints "Python was not found..." and exits. Ask for a version instead.
+set "PY="
+for %%C in (python python3 py) do (
+  if not defined PY (
+    %%C --version 2>nul | findstr /b /c:"Python 3" >nul && set "PY=%%C"
+  )
+)
+if not defined PY (
   echo   Python is not installed. Install it once with this command,
   echo   then run this file again:
   echo.
   echo       winget install Python.Python.3.12
+  echo.
+  echo   If Windows opened the Microsoft Store instead, turn off the python
+  echo   shortcut under Settings ^> Apps ^> Advanced app settings ^>
+  echo   App execution aliases, then try again.
   echo.
   pause
   exit /b 1
@@ -21,7 +32,7 @@ if errorlevel 1 (
 if not exist .venv (
   echo   First run: setting up. This takes a few minutes and only happens once.
   echo.
-  python -m venv .venv || goto :fail
+  %PY% -m venv .venv || goto :fail
   .venv\Scripts\python -m pip install --upgrade pip --quiet
   .venv\Scripts\pip install -r requirements.txt || goto :fail
   echo.
