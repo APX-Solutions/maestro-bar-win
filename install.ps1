@@ -126,24 +126,32 @@ Pop-Location
 # shortcut in Startup means nobody has to remember to launch anything or keep a
 # black window open. The venv it points at does not exist yet; the first run
 # creates it, and the shortcut is only used from the next login onwards.
+# Two shortcuts, both pointing at pythonw (no console window):
+#   Startup    - so it is simply running, every day, without anyone deciding to
+#   Start Menu - so "Maestro" in the Start box finds it, the way an app should
+#                be found. Telling someone to open a .bat inside a folder they
+#                have to navigate to is not an app, it is a chore.
 try {
-  $startup = [Environment]::GetFolderPath('Startup')
-  $lnk = Join-Path $startup 'Maestro Bar.lnk'
   $w = New-Object -ComObject WScript.Shell
-  $sc = $w.CreateShortcut($lnk)
-  $sc.TargetPath       = Join-Path $dest '.venv\Scripts\pythonw.exe'
-  $sc.Arguments        = 'maestro_bar.py'
-  $sc.WorkingDirectory = $dest
-  $sc.Description      = 'Maestro Bar'
-  $sc.Save()
-  Write-Host "  Will start automatically when you log in."
+  $target = Join-Path $dest '.venv\Scripts\pythonw.exe'
+  foreach ($dir in @([Environment]::GetFolderPath('Startup'),
+                     [Environment]::GetFolderPath('Programs'))) {
+    $sc = $w.CreateShortcut((Join-Path $dir 'Maestro Bar.lnk'))
+    $sc.TargetPath       = $target
+    $sc.Arguments        = 'maestro_bar.py'
+    $sc.WorkingDirectory = $dest
+    $sc.Description      = 'Maestro Bar'
+    $sc.Save()
+  }
+  Write-Host "  Added to Start, and starts automatically when you log in."
 } catch {
-  Write-Host "  (could not add it to startup - not fatal, you can open it from $dest)"
+  Write-Host "  (could not add shortcuts - not fatal, you can open it from $dest)"
 }
 Write-Host ""
 Write-Host "  Starting it now. You can close the window it opens."
 Write-Host ""
 Write-Host "  Press Ctrl+Alt+M to show and hide the bar. That is all you need to do."
+Write-Host "  If you ever quit it: press Start, type Maestro, press Enter."
 Write-Host ""
 Write-Host "  Later, to update: double-click update.bat in $dest"
 Write-Host ""
