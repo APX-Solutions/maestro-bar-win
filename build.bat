@@ -1,5 +1,8 @@
 @echo off
 REM Build a single MaestroBar.exe into dist\.
+REM The bar is a web page (ui\) shown in QtWebEngine, so the exe carries
+REM Chromium: expect ~150 MB more than before. PyInstaller's PySide6 hooks
+REM pick up QtWebEngineProcess and its resources on their own.
 cd /d "%~dp0"
 if not exist .venv (
   python -m venv .venv || goto :nopython
@@ -24,8 +27,11 @@ if not exist vendor\ffmpeg.exe (
   --noconfirm --clean --onefile --windowed ^
   --name MaestroBar ^
   --add-data "bar.json;." ^
+  --add-data "ui;ui" ^
   --add-binary "vendor\ffmpeg.exe;." ^
   --hidden-import keyring.backends.Windows ^
+  --hidden-import PySide6.QtWebEngineWidgets ^
+  --hidden-import PySide6.QtWebChannel ^
   --collect-submodules pynput ^
   maestro_bar.py
 
