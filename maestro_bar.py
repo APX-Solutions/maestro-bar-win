@@ -427,13 +427,15 @@ class MaestroBar:
                       area.center().y() - self.bar.height() // 2)
 
     def toggle_bar(self):
+        """The bar comes back the way it went away: parked, with the panel
+        shut. Opening the panel is a click on the chevron and nothing else."""
         if self.bar.isVisible():
             self.bar.hide()
         else:
             self.bar.show()
             self.bar.raise_()
             self.send_state()
-            self.send({"type": "expand"})
+            self.send({"type": "fold"})
 
     # -- talking to the page -----------------------------------------------
     def send(self, msg: dict) -> None:
@@ -520,12 +522,8 @@ class MaestroBar:
         elif t == "record":
             self.toggle_record(str(m.get("mode", "audio")))
         elif t == "open_url":
+            # Citations, and nothing else: the page never asks for a bare URL.
             url = str(m.get("url") or "")
-            if not url:
-                for it in self.cfg.get("items", []) or []:
-                    if it.get("type") == "open" and it.get("url"):
-                        url = it["url"]
-                        break
             if url:
                 import webbrowser
                 webbrowser.open(url)

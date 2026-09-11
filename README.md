@@ -5,20 +5,21 @@ right edge of the screen, level with the middle; the panel opens beside it,
 holding the review queue, a box for capturing a thought, and a box for asking
 the company brain.
 
-`Ctrl+Alt+M` shows and hides it. There is also a tray icon.
+`Ctrl+Alt+M` shows and hides it, always with the panel shut: click the chevron
+to open it. There is also a tray icon.
 
 ```
                                           +---+
    +------------------------------------+ | : |  drag it; it returns to an edge
    | Review                  <  1 of 3 > | +---+
-   | Follow up on the Ohrid shoot       | | M |  open Maestro
-   | Kupola Media                       | | o |  record audio
-   | Hi Marko, thanks for the call ...  | | # |  record the screen
-   | + Done   Dismiss   Send the email  | | < |  open and close the panel
-   |                                    | +---+
-   | Review 3 . Capture . Ask           | | X |  put it away
-   | +--------------------------------+ | +---+
-   | | Tell the agent what to change  | |  46px
+   | Follow up on the Ohrid shoot       | | o |  record audio
+   | Kupola Media                       | | # |  record the screen
+   | Hi Marko, thanks for the call ...  | | < |  open and close the panel
+   | + Done   Dismiss   Send the email  | +---+
+   |                                    | | X |  put it away
+   | Review 3 . Capture . Ask           | +---+
+   | +--------------------------------+ |  46px
+   | | Tell the agent what to change  | |
    | +--------------------------------+ |
    +------------------------------------+
 ```
