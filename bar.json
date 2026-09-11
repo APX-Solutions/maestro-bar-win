@@ -12,7 +12,7 @@
     "enabled": true,
     "hotkey": "<ctrl>+<alt>+m",
     "refresh_seconds": 90,
-    "invisible": true,
+    "invisible": false,
     "ask_path": "/brain/ask",
     "ask_placeholder": "Ask about clients, meetings, decisions",
     "record": [

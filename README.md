@@ -37,10 +37,9 @@ The page runs in QtWebEngine, so the .exe now carries Chromium and is about
 150 MB larger than the old one. That is the price of the two platforms looking
 identical rather than approximately alike.
 
-The window is excluded from screen capture with `SetWindowDisplayAffinity`, so
-the bar is not in a shared screen or a recording. That needs Windows 10 2004 or
-newer; older builds ignore it and the bar is simply visible. `"invisible": false`
-in `bar.json` turns it off.
+The bar is in a screen share like any other window. `"invisible": true` in
+`bar.json` keeps it out of one, using `SetWindowDisplayAffinity`. That needs
+Windows 10 2004 or newer; older builds ignore it and the bar stays visible.
 
 ## Running it (no .exe yet)
 
