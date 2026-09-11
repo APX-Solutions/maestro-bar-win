@@ -206,6 +206,7 @@ class MaestroBar:
         self.bridge = Bridge()
         self.counts: dict[str, int] = {}
         self.on_right = True          # which edge the strip is parked against
+        self.pending_record = None    # the mode waiting on "where is this?"
         self.placed = False           # has anyone dragged it themselves yet
         self.rows: dict[str, list[dict]] = {}       # section id → raw rows
         self.page_ready = False
@@ -522,6 +523,10 @@ class MaestroBar:
             self.ask(str(m.get("text", "")))
         elif t == "record":
             self.toggle_record(str(m.get("mode", "audio")))
+        elif t == "url_answer":
+            mode, self.pending_record = self.pending_record, None
+            if mode:
+                self.recorder.start(mode, self.cfg, page_url=str(m.get("url") or ""))
         elif t == "open_url":
             # Citations, and nothing else: the page never asks for a bare URL.
             url = str(m.get("url") or "")
@@ -698,14 +703,37 @@ class MaestroBar:
             return ""
         return (text or "").strip() if ok else ""
 
+    @staticmethod
+    def clipboard_url() -> str:
+        """Prefilled from the clipboard when it holds an address, which it
+        usually does: someone reporting a page copied it on the way here."""
+        try:
+            clip = (QApplication.clipboard().text() or "").strip()
+        except Exception:  # noqa: BLE001 — no clipboard is not a reason to refuse
+            return ""
+        return clip if clip.lower().startswith(("http://", "https://")) and len(clip) <= 2000 else ""
+
     def toggle_record(self, mode: str):
-        # Only when starting. Asking on the way out would put the dialog in
-        # front of someone trying to stop, and the recording keeps rolling
-        # while they read it.
+        """Starting a recording asks one question first: where is this? It used
+        to be a dialog in front of everything; now it is the bar's own box,
+        which is where the click that started this happened, and it closes the
+        moment it has an answer.
+
+        Only on the way in. Asking on the way out would put the question in
+        front of someone trying to stop, while the recording keeps rolling."""
         if self.recorder.is_recording:
             self.recorder.stop()
             return
-        self.recorder.start(mode, self.cfg, page_url=self.ask_page_url())
+        if not self.page_ready:
+            # No page to ask in yet, so fall back to the dialog.
+            self.recorder.start(mode, self.cfg, page_url=self.ask_page_url())
+            return
+        self.pending_record = mode
+        if not self.bar.isVisible():
+            self.bar.show()
+            self.bar.raise_()
+        self.bar.activateWindow()
+        self.send({"type": "ask_url", "mode": mode, "prefill": self.clipboard_url()})
 
     def toggle_audio(self):
         self.toggle_record("audio")

@@ -41,6 +41,16 @@ The bar is in a screen share like any other window. `"invisible": true` in
 `bar.json` keeps it out of one, using `SetWindowDisplayAffinity`. That needs
 Windows 10 2004 or newer; older builds ignore it and the bar stays visible.
 
+## Starting a recording
+
+Pressing either record button asks one question first, in the bar itself:
+where is this? A screen recording shows the page but not dependably its
+address, and that is the one fact it cannot carry.
+
+The box is prefilled from the clipboard when it holds an address, so the whole
+question is one Enter. Skip and Escape record without one. Either way the
+panel closes and the recording starts. It is only asked on the way in.
+
 ## Running it (no .exe yet)
 
 Unzip the folder anywhere and double-click **START HERE.bat**.
