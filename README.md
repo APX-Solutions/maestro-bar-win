@@ -1,22 +1,45 @@
 # Maestro Bar for Windows
 
-The same strip as the Mac version, rebuilt natively for Windows. A thin bar of
-icons parks against the edge of the screen; clicking one opens a small flyout
-beside it. Drag it anywhere and it snaps back to the nearer edge.
+The same bar as the Mac version. A strip one button wide parks against the
+right edge of the screen, level with the middle; the panel opens beside it,
+holding the review queue, a box for capturing a thought, and a box for asking
+the company brain.
 
 `Ctrl+Alt+M` shows and hides it. There is also a tray icon.
 
 ```
-   ┌────┐
-   │ ▤ ●│   Review, with a dot when something is waiting
-   │ ✎  │   Capture
-   │ ⏺  │   Record audio
-   │ ▣  │   Record screen and audio
-   └────┘
+                                          +---+
+   +------------------------------------+ | : |  drag it; it returns to an edge
+   | Review                  <  1 of 3 > | +---+
+   | Follow up on the Ohrid shoot       | | M |  open Maestro
+   | Kupola Media                       | | o |  record audio
+   | Hi Marko, thanks for the call ...  | | # |  record the screen
+   | + Done   Dismiss   Send the email  | | < |  open and close the panel
+   |                                    | +---+
+   | Review 3 . Capture . Ask           | | X |  put it away
+   | +--------------------------------+ | +---+
+   | | Tell the agent what to change  | |  46px
+   | +--------------------------------+ |
+   +------------------------------------+
 ```
 
-It reads **the same `bar.json`** the Mac app reads, so the queue, the buttons,
-the endpoints and the field mappings are defined once for both platforms.
+Idle, the strip says nothing at all. While a recording runs it shows a timer
+and the button that started it turns red. Dropped anywhere, it returns to the
+nearer edge.
+
+It reads **the same `bar.json`** the Mac app reads, and shows **the same page**:
+`ui/` here is a copy of `MaestroBar/ui` in the Mac repo, made by
+`scripts/sync-ui.sh` there. Edit it in one place, run that script, commit both.
+Do not edit `ui/` here by hand.
+
+The page runs in QtWebEngine, so the .exe now carries Chromium and is about
+150 MB larger than the old one. That is the price of the two platforms looking
+identical rather than approximately alike.
+
+The window is excluded from screen capture with `SetWindowDisplayAffinity`, so
+the bar is not in a shared screen or a recording. That needs Windows 10 2004 or
+newer; older builds ignore it and the bar is simply visible. `"invisible": false`
+in `bar.json` turns it off.
 
 ## Running it (no .exe yet)
 

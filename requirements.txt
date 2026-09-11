@@ -1,4 +1,5 @@
-PySide6>=6.6
+PySide6>=6.6          # the full package: Essentials + Addons. Addons carries
+                      # QtWebEngine and QtWebChannel, which the bar needs.
 requests>=2.31
 keyring>=24
 pynput>=1.7

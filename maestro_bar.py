@@ -1,9 +1,10 @@
 """Maestro Bar for Windows.
 
-A thin strip of icons parked against the edge of the screen. Clicking one
-opens a small flyout beside it. The strip can be dragged anywhere and snaps
-back to the nearer edge. Everything it shows comes from bar.json, the same
-file the Mac app reads.
+A pill at the top of the screen with a panel beneath it: recording, the
+review queue, capture and a box to ask the company brain. The page itself
+(ui/) is shared with the Mac app; this file owns the window, the token, the
+recorder and every HTTP call. Everything it shows comes from bar.json, the
+same file the Mac app reads.
 
 Run:    python maestro_bar.py
 Build:  build.bat   (produces dist\\MaestroBar.exe)
@@ -11,6 +12,7 @@ Build:  build.bat   (produces dist\\MaestroBar.exe)
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -18,22 +20,20 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QPoint, QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QPainter, QPainterPath
-from PySide6.QtWidgets import (QApplication, QHBoxLayout, QInputDialog, QLabel,
-                               QLineEdit, QMenu, QMessageBox, QPushButton,
-                               QSystemTrayIcon, QTextEdit, QToolButton,
-                               QVBoxLayout, QWidget)
+from PySide6.QtCore import (QFile, QIODevice, QObject, QPoint, Qt, QTimer, QUrl,
+                            Signal, Slot)
+from PySide6.QtGui import QAction, QCursor
+from PySide6.QtWebChannel import QWebChannel
+from PySide6.QtWebEngineCore import QWebEngineScript
+from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWidgets import (QApplication, QInputDialog, QLineEdit, QMenu,
+                               QMessageBox, QSystemTrayIcon, QVBoxLayout, QWidget)
 
 import api
 import config
 from icons import icon
 from recorder import Recorder
 
-ITEM = 34            # one icon cell on the strip
-BG = QColor(58, 58, 60, 236)
-FG = "#e8e8e8"
-DIM = "#9a9a9e"
 
 
 class Bridge(QObject):
@@ -41,338 +41,158 @@ class Bridge(QObject):
     hotkey = Signal()
     api_result = Signal(object, int, str)
     count = Signal(str, int)
+    to_web = Signal(object)
     recorder_changed = Signal()
     recorder_message = Signal(str, str)
 
 
 # --------------------------------------------------------------------------
-# the flyout
+# the bar: one web page, shared with the Mac app
 # --------------------------------------------------------------------------
 
-class Flyout(QWidget):
-    def __init__(self, app: "MaestroBar", section: dict):
-        super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+class WebBridge(QObject):
+    """The page's end of the conversation. `send` is what app.js calls;
+    `toWeb` is what the app emits. Both carry one JSON object as a string."""
+    toWeb = Signal(str)
+
+    def __init__(self, app: "MaestroBar"):
+        super().__init__()
         self.app = app
-        self.section = section
-        self.rows: list[dict] = []
-        self.index = 0
-        self.loading = bool(section.get("list"))
 
-        width = int(app.sidebar.get("flyout_width", 330))
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(14, 12, 14, 12)
-        outer.setSpacing(6)
-
-        self.title = QLabel("")
-        self.title.setWordWrap(True)
-        self.title.setStyleSheet(f"color:{FG};font-size:13px;font-weight:600;")
-        self.subtitle = QLabel("")
-        self.subtitle.setStyleSheet(f"color:{DIM};font-size:11px;")
-        self.counter = QLabel("")
-        self.counter.setStyleSheet("color:#7a7a7e;font-size:11px;")
-
-        self.body = QTextEdit()
-        self.body.setReadOnly(True)
-        self.body.setFrameStyle(0)
-        self.body.setStyleSheet(
-            f"background:transparent;color:{FG};font-size:11px;border:none;")
-
-        self.input = QLineEdit()
-        self.input.setStyleSheet(
-            "background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);"
-            f"border-radius:8px;padding:6px 8px;color:{FG};font-size:11px;")
-        self.input.returnPressed.connect(self.send)
-
-        compose = section.get("compose")
-        if section.get("list"):
-            outer.addWidget(self.title)
-            outer.addWidget(self.subtitle)
-            outer.addWidget(self.body, 1)
-            outer.addLayout(self._action_bar())
-            if compose:
-                self.input.setPlaceholderText(compose.get("placeholder", "Start typing"))
-                outer.addWidget(self.input)
-            self.setFixedSize(width, 240 if compose else 205)
-            self.load()
-        else:
-            head = QLabel(section.get("title", "Capture"))
-            head.setStyleSheet(f"color:{DIM};font-size:11px;font-weight:600;")
-            outer.addWidget(head)
-            self.input.setPlaceholderText((compose or {}).get("placeholder", "Start typing"))
-            outer.addWidget(self.input)
-            row = QHBoxLayout()
-            row.addStretch(1)
-            if (compose or {}).get("record", True):
-                self.mic = self._icon_button("mic", "Record", self.app.toggle_audio)
-                row.addWidget(self.mic)
-            row.addWidget(self._icon_button("send", "Send", self.send))
-            outer.addLayout(row)
-            self.setFixedSize(width, 104)
-
-        self.render()
-
-    # -- chrome ------------------------------------------------------------
-    def _icon_button(self, name: str, tip: str, slot) -> QToolButton:
-        b = QToolButton()
-        b.setIcon(icon(name, FG, 18))
-        b.setToolTip(tip)
-        b.setAutoRaise(True)
-        b.setFixedSize(26, 24)
-        b.setStyleSheet("QToolButton{border:none;}"
-                        "QToolButton:hover{background:rgba(255,255,255,0.12);border-radius:5px;}")
-        b.clicked.connect(slot)
-        return b
-
-    def _action_bar(self) -> QHBoxLayout:
-        bar = QHBoxLayout()
-        bar.setSpacing(2)
-        bar.addWidget(self._icon_button("left", "Previous", lambda: self.step(-1)))
-        actions = self.section.get("actions") or []
-        if actions:
-            bar.addWidget(self._icon_button(
-                "check", actions[0].get("label", "Do"),
-                lambda: self.perform(actions[0])))
-        if len(actions) > 1:
-            more = self._icon_button("more", "More", lambda: None)
-            menu = QMenu(more)
-            for a in actions[1:]:
-                act = QAction(a.get("label", "..."), menu)
-                act.triggered.connect(lambda _=False, a=a: self.perform(a))
-                menu.addAction(act)
-            more.setMenu(menu)
-            more.setPopupMode(QToolButton.InstantPopup)
-            bar.addWidget(more)
-        bar.addWidget(self._icon_button("right", "Next", lambda: self.step(1)))
-        bar.addStretch(1)
-        bar.addWidget(self.counter)
-        return bar
-
-    def paintEvent(self, _):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        path = QPainterPath()
-        path.addRoundedRect(QRect(0, 0, self.width(), self.height()), 12, 12)
-        p.fillPath(path, BG)
-
-    def keyPressEvent(self, e):
-        if e.key() == Qt.Key_Escape:
-            self.app.close_flyout()
-        else:
-            super().keyPressEvent(e)
-
-    # -- data --------------------------------------------------------------
-    def load(self):
-        path = self.section.get("list")
-        if not path or not self.app.cfg.get("api"):
-            self.loading = False
-            self.render()
+    @Slot(str)
+    def send(self, raw: str) -> None:
+        try:
+            msg = json.loads(raw)
+        except ValueError:
             return
-        self.loading = True
-        self.render()
-        self.app.api.get(path, lambda payload, code:
-                         self.app.bridge.api_result.emit(payload, code, "list"))
-
-    def took_list(self, payload, code):
-        self.loading = False
-        self.rows = api.rows(payload) if code == 200 else []
-        self.index = 0
-        self.app.set_count(self.section.get("id", ""), len(self.rows))
-        self.render()
-
-    def step(self, delta: int):
-        if self.rows:
-            self.index = max(0, min(len(self.rows) - 1, self.index + delta))
-            self.render()
-
-    def current(self) -> dict | None:
-        return self.rows[self.index] if 0 <= self.index < len(self.rows) else None
-
-    def perform(self, action: dict):
-        row = self.current()
-        if not row or not action.get("path"):
-            return
-        path = api.substitute(action["path"], row)
-        label = action.get("label", "Action")
-
-        def done(_payload, code):
-            if 200 <= code < 300:
-                if action.get("toast"):
-                    self.app.notify("Maestro", action["toast"])
-            else:
-                self.app.notify("Maestro", f"{label} failed ({code or 'no reply'})")
-                self.load()
-
-        self.app.api.call(action.get("method", "POST"), path, action.get("body"), done)
-
-        if action.get("advance", True):
-            # Optimistic: the card leaves at once and a failure reloads the
-            # list. Waiting for the round trip makes triage feel broken.
-            del self.rows[self.index]
-            self.index = min(self.index, max(0, len(self.rows) - 1))
-            self.app.set_count(self.section.get("id", ""), len(self.rows))
-            self.render()
-
-    def send(self):
-        compose = self.section.get("compose") or {}
-        text = self.input.text().strip()
-        if not text:
-            return
-
-        # Not every destination exists as an endpoint yet. Appending to a file
-        # keeps the box useful now, and only the config changes later.
-        if not compose.get("path"):
-            target = compose.get("file")
-            if not target:
-                return
-            self.input.clear()
-            p = config.expand(target)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            with open(p, "a", encoding="utf-8") as fh:
-                fh.write(f"\n## {stamp}\n{text}\n")
-            self.app.notify("Maestro", compose.get("toast", "Captured"))
-            return
-
-        body = {compose.get("field", "text"): text, "section": self.section.get("id", "")}
-        path = compose["path"]
-        row = self.current()
-        if row:
-            path = api.substitute(path, row)
-            if api.row_id(row):
-                body["item_id"] = api.row_id(row)
-        if "{" in path:
-            self.app.notify("Maestro", "That box needs a card open")
-            return
-        self.input.clear()
-        self.app.api.post(path, body, lambda _p, code: self.app.notify(
-            "Maestro", compose.get("toast", "Sent") if 200 <= code < 300
-            else f"Could not send ({code or 'no reply'})"))
-
-    # -- drawing -----------------------------------------------------------
-    def render(self):
-        if not self.section.get("list"):
-            return
-        fields = self.section.get("fields") or {}
-        row = self.current()
-        if row:
-            self.title.setText(api.field(row, fields.get("title", ["title"])) or "Untitled")
-            sub = api.field(row, fields.get("subtitle", ["client_name"]))
-            self.subtitle.setText(sub)
-            self.subtitle.setVisible(bool(sub))
-            self.body.setPlainText(api.field(row, fields.get("body", ["detail"])))
-            self.counter.setText(f"{self.index + 1} of {len(self.rows)}")
-        else:
-            self.title.setText("Loading" if self.loading else "Nothing waiting")
-            self.subtitle.setVisible(False)
-            self.body.setPlainText(
-                "" if self.loading else
-                ("No API is configured." if not self.app.cfg.get("api") else ""))
-            self.counter.setText("")
+        if isinstance(msg, dict):
+            self.app.from_web(msg)
 
 
-# --------------------------------------------------------------------------
-# the strip
-# --------------------------------------------------------------------------
+def ui_dir() -> Path:
+    """ui/ beside the script, or inside the exe. It is a copy of
+    MaestroBar/ui in the Mac repo, made by scripts/sync-ui.sh there."""
+    return config.bundled("ui")
 
-class Strip(QWidget):
+
+class BarWindow(QWidget):
+    """A transparent window the size of the page. The page draws the pill and
+    the panel and reports its own height; the window follows."""
+
     def __init__(self, app: "MaestroBar"):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.app = app
-        self._drag: QPoint | None = None
-        self.buttons: list[tuple[QToolButton, str]] = []
+        self._drag_last: QPoint | None = None
+        self._drag_timer = QTimer(self)
+        self._drag_timer.setInterval(12)
+        self._drag_timer.timeout.connect(self._drag_step)
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(7, 6, 7, 8)
-        lay.setSpacing(4)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.view = QWebEngineView(self)
+        self.view.page().setBackgroundColor(Qt.transparent)
+        lay.addWidget(self.view)
 
-        grip = QLabel()
-        grip.setFixedHeight(3)
-        grip.setStyleSheet("background:rgba(255,255,255,0.35);border-radius:1px;")
-        grip.setFixedWidth(16)
-        lay.addWidget(grip, 0, Qt.AlignHCenter)
-        lay.addSpacing(2)
+        self.bridge = WebBridge(app)
+        self.channel = QWebChannel(self.view.page())
+        self.channel.registerObject("maestro", self.bridge)
+        self.view.page().setWebChannel(self.channel)
 
-        for i, s in enumerate(app.sidebar.get("sections", [])):
-            b = self._button(s.get("symbol_win") or self._symbol(s), s.get("title", ""))
-            b.clicked.connect(lambda _=False, i=i: app.toggle_flyout(i))
-            lay.addWidget(b, 0, Qt.AlignHCenter)
-            self.buttons.append((b, s.get("id", "")))
+        # Qt's own client script, injected before the page runs so app.js
+        # finds QWebChannel on window without shipping a copy of it.
+        f = QFile(":/qtwebchannel/qwebchannel.js")
+        if f.open(QIODevice.ReadOnly):
+            script = QWebEngineScript()
+            script.setSourceCode(bytes(f.readAll()).decode("utf-8"))
+            script.setName("qwebchannel")
+            script.setInjectionPoint(QWebEngineScript.DocumentCreation)
+            script.setWorldId(QWebEngineScript.MainWorld)
+            script.setRunsOnSubFrames(False)
+            self.view.page().scripts().insert(script)
+            f.close()
 
-        for r in app.sidebar.get("record", []):
-            mode = r.get("mode", "audio")
-            b = self._button("monitor" if mode == "screen" else "record",
-                             r.get("label", "Record"))
-            b.clicked.connect(lambda _=False, m=mode: app.toggle_record(m))
-            lay.addWidget(b, 0, Qt.AlignHCenter)
-            self.buttons.append((b, "record:" + mode))
+        index = ui_dir() / "index.html"
+        if index.is_file():
+            self.view.load(QUrl.fromLocalFile(str(index)))
+        else:
+            print(f"[bar] {index} is missing; nothing to show")
+        self.setFixedSize(600, 86)
 
-        self.setFixedWidth(int(app.sidebar.get("width", 44)))
-        self.adjustSize()
+    def resize_to(self, w: int, h: int, centre: int | None = None) -> None:
+        """The page measures itself and the window follows. The parked edge
+        stays put, so opening the panel grows the window inwards rather than
+        pushing the strip off the screen.
 
-    @staticmethod
-    def _symbol(section: dict) -> str:
-        """Map the Mac's SF Symbol names onto the drawn set."""
-        name = (section.get("symbol") or "").lower()
-        if "mic" in name or "pencil" in name or "square.and" in name:
-            return "pencil"
-        if "display" in name or "rectangle" in name:
-            return "monitor"
-        if "record" in name:
-            return "record"
-        return "tray"
+        `centre` is how far down the strip's own middle sits. Until someone
+        drags the bar, that middle is held level with the middle of the screen
+        — the strip's middle, not the window's, which is mostly panel once the
+        panel is open."""
+        if w <= 0 or h <= 0:
+            return
+        area = (self.screen() or QApplication.primaryScreen()).availableGeometry()
+        right, top = self.x() + self.width(), self.y()
+        self.setFixedSize(w, h)
+        x = right - w if self.app.on_right else self.x()
+        if centre is not None and not self.app.placed:
+            top = area.center().y() - centre
+        x = min(max(x, area.left()), area.right() - w + 1)
+        top = min(max(top, area.top()), max(area.top(), area.bottom() - h + 1))
+        self.move(x, top)
 
-    def _button(self, symbol: str, tip: str) -> QToolButton:
-        b = QToolButton(self)
-        b.setIcon(icon(symbol, FG))
-        b.setToolTip(tip)
-        b.setAutoRaise(True)
-        b.setFixedSize(30, 30)
-        b.setStyleSheet("QToolButton{border:none;}"
-                        "QToolButton:hover{background:rgba(255,255,255,0.14);border-radius:7px;}")
-        return b
+    # -- dragging: the page cannot move the window, so it asks ---------------
+    def start_drag(self) -> None:
+        self._drag_last = QCursor.pos()
+        self._drag_timer.start()
 
-    def paintEvent(self, _):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        path = QPainterPath()
-        path.addRoundedRect(QRect(0, 0, self.width(), self.height()), 12, 12)
-        p.fillPath(path, BG)
-        # a dot in the corner of any section that has something waiting
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor(255, 69, 58))
-        for b, key in self.buttons:
-            if self.app.counts.get(key, 0) > 0:
-                g = b.geometry()
-                p.drawEllipse(g.right() - 7, g.top() + 1, 7, 7)
+    def _drag_step(self) -> None:
+        if not (QApplication.mouseButtons() & Qt.LeftButton):
+            self._drag_timer.stop()
+            self.snap()
+            return
+        p = QCursor.pos()
+        if self._drag_last is not None:
+            d = p - self._drag_last
+            if d.x() or d.y():
+                self.move(self.pos() + d)
+        self._drag_last = p
 
-    # -- dragging, and snapping back to an edge ----------------------------
-    def mousePressEvent(self, e):
-        if e.button() == Qt.LeftButton:
-            self._drag = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
-
-    def mouseMoveEvent(self, e):
-        if self._drag is not None and e.buttons() & Qt.LeftButton:
-            self.move(e.globalPosition().toPoint() - self._drag)
-            self.app.place_flyout()
-
-    def mouseReleaseEvent(self, _):
-        self._drag = None
-        self.snap()
-
-    def snap(self):
-        screen = self.screen() or QApplication.primaryScreen()
-        area = screen.availableGeometry()
+    def snap(self) -> None:
+        """Dropped anywhere, the bar returns to the nearer edge — the
+        placement it has always had, and the one that leaves the middle of the
+        screen free."""
+        area = (self.screen() or QApplication.primaryScreen()).availableGeometry()
         f = self.frameGeometry()
-        to_left = abs(f.left() - area.left())
-        to_right = abs(area.right() - f.right())
-        self.app.on_right = to_right <= to_left
-        x = area.right() - f.width() - 8 if self.app.on_right else area.left() + 8
-        y = min(max(f.top(), area.top() + 8), area.bottom() - f.height() - 8)
+        self.app.on_right = (area.right() - f.right()) <= (f.left() - area.left())
+        x = area.right() - f.width() + 1 if self.app.on_right else area.left()
+        y = min(max(f.top(), area.top()), max(area.top(), area.bottom() - f.height() + 1))
         self.move(x, y)
-        config.write_state({"x": x, "y": y, "on_right": self.app.on_right})
-        self.app.place_flyout()
+        self.app.placed = True
+        # The anchor is the corner against the parked edge, not the left one:
+        # the window is narrow while folded and wide while open, and only the
+        # parked corner is the same point in both.
+        config.write_state({"anchor": x + f.width() if self.app.on_right else x,
+                            "top": y, "on_right": self.app.on_right})
+        self.app.send({"type": "edge", "edge": "right" if self.app.on_right else "left"})
+
+    # -- invisibility, the Windows way ----------------------------------------
+    def apply_invisibility(self, on: bool) -> None:
+        """Left out of screen shares and of the app's own screen recording,
+        the way Zoom's overlays are. WDA_EXCLUDEFROMCAPTURE needs Windows 10
+        2004 or newer; older builds simply ignore the call."""
+        if not sys.platform.startswith("win"):
+            return
+        try:
+            import ctypes
+            ctypes.windll.user32.SetWindowDisplayAffinity(int(self.winId()), 0x11 if on else 0x0)
+        except Exception:  # noqa: BLE001 — a cosmetic feature must never take the bar down
+            pass
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape:
+            self.app.send({"type": "escape"})
+        else:
+            super().keyPressEvent(e)
 
 
 # --------------------------------------------------------------------------
@@ -384,9 +204,11 @@ class MaestroBar:
         self.qt = qt
         self.bridge = Bridge()
         self.counts: dict[str, int] = {}
-        self.on_right = True
-        self.flyout: Flyout | None = None
-        self.open_index: int | None = None
+        self.on_right = True          # which edge the strip is parked against
+        self.placed = False           # has anyone dragged it themselves yet
+        self.rows: dict[str, list[dict]] = {}       # section id → raw rows
+        self.page_ready = False
+        self.queued: list[dict] = []
 
         config.install_default_if_missing()
         self.cfg, self.cfg_source = config.load()
@@ -397,23 +219,25 @@ class MaestroBar:
             on_change=self.bridge.recorder_changed.emit,
             on_message=self.bridge.recorder_message.emit)
 
-        self.bridge.hotkey.connect(self.toggle_strip)
+        self.bridge.hotkey.connect(self.toggle_bar)
         self.bridge.recorder_changed.connect(self.recording_changed)
         self.bridge.recorder_message.connect(self.notify)
         self.bridge.api_result.connect(self._api_result)
         self.bridge.count.connect(self.set_count)
+        self.bridge.to_web.connect(self._to_web)
 
         self.tray = QSystemTrayIcon(icon("tray", "#d0d0d0", 32))
         self.tray.setToolTip("Maestro Bar")
         self.tray.setContextMenu(self.build_tray_menu())
         self.tray.activated.connect(
-            lambda reason: self.toggle_strip()
+            lambda reason: self.toggle_bar()
             if reason == QSystemTrayIcon.Trigger else None)
         self.tray.show()
 
-        self.strip = Strip(self)
-        self.place_strip()
-        self.strip.show()
+        self.bar = BarWindow(self)
+        self.place_bar()
+        self.bar.show()
+        self.bar.apply_invisibility(bool(self.sidebar.get("invisible", True)))
 
         self.tick = QTimer()
         self.tick.timeout.connect(self.paint_tick)
@@ -453,7 +277,7 @@ class MaestroBar:
 
     def build_tray_menu(self) -> QMenu:
         m = QMenu()
-        m.addAction(QAction("Show or hide the strip", m, triggered=self.toggle_strip))
+        m.addAction(QAction("Show or hide the strip", m, triggered=self.toggle_bar))
         m.addSeparator()
         m.addAction(QAction("Set API token…", m, triggered=self.ask_token))
         m.addAction(QAction("Choose microphone…", m, triggered=self.choose_microphone))
@@ -573,66 +397,267 @@ class MaestroBar:
         except Exception as e:                            # noqa: BLE001
             print(f"[hotkey] {combo} not registered: {e}")
 
-    # -- strip and flyout --------------------------------------------------
-    def place_strip(self):
+    # -- the window and the page ---------------------------------------
+
+    # -- the window --------------------------------------------------------
+    @staticmethod
+    def screen_at_cursor():
+        """The screen the pointer is on, not the one with keyboard focus.
+
+        With two displays, focus put the bar on one screen and the clamp then
+        pulled it to the edge of the other. Where the pointer is is both
+        stable and what someone means by "here"."""
+        return QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+
+    def place_bar(self):
         st = config.read_state()
-        screen = QApplication.primaryScreen().availableGeometry()
-        if "x" in st and "y" in st:
-            self.on_right = bool(st.get("on_right", True))
-            self.strip.move(int(st["x"]), int(st["y"]))
-            return
-        self.on_right = self.sidebar.get("edge", "right") != "left"
-        w = self.strip.width()
-        x = screen.right() - w - 8 if self.on_right else screen.left() + 8
-        self.strip.move(x, screen.center().y() - self.strip.height() // 2)
+        area = self.screen_at_cursor().availableGeometry()
+        self.on_right = bool(st.get("on_right", True))
+        self.placed = "anchor" in st and "top" in st
+        if self.placed:
+            anchor, top = int(st["anchor"]), int(st["top"])
+            x = anchor - self.bar.width() if self.on_right else anchor
+            if area.adjusted(-40, -40, 40, 40).contains(QPoint(x, top)):
+                self.bar.move(x, top)
+                return
+            self.placed = False
+        # The right edge, level with the middle of the screen: where the strip
+        # parked before this, and clear of what is being read.
+        self.bar.move(area.right() - self.bar.width() + 1,
+                      area.center().y() - self.bar.height() // 2)
 
-    def toggle_strip(self):
-        if self.strip.isVisible():
-            self.close_flyout()
-            self.strip.hide()
+    def toggle_bar(self):
+        if self.bar.isVisible():
+            self.bar.hide()
         else:
-            self.strip.show()
-            self.strip.raise_()
+            self.bar.show()
+            self.bar.raise_()
+            self.send_state()
+            self.send({"type": "expand"})
 
-    def toggle_flyout(self, i: int):
-        if self.open_index == i:
-            self.close_flyout()
-            return
-        self.close_flyout()
-        sections = self.sidebar.get("sections", [])
-        if not (0 <= i < len(sections)):
-            return
-        self.open_index = i
-        self.flyout = Flyout(self, sections[i])
-        self.place_flyout()
-        self.flyout.show()
-        self.flyout.raise_()
-        self.flyout.activateWindow()
-        self.flyout.input.setFocus()
+    # -- talking to the page -----------------------------------------------
+    def send(self, msg: dict) -> None:
+        """Any thread may call this; the page is reached on the Qt thread."""
+        self.bridge.to_web.emit(msg)
 
-    def close_flyout(self):
-        if self.flyout:
-            self.flyout.close()
-        self.flyout = None
-        self.open_index = None
-
-    def place_flyout(self):
-        if not self.flyout:
+    def _to_web(self, msg: dict) -> None:
+        if not self.page_ready:
+            self.queued.append(msg)
             return
-        area = (self.strip.screen() or QApplication.primaryScreen()).availableGeometry()
-        s = self.strip.frameGeometry()
-        w, h = self.flyout.width(), self.flyout.height()
-        x = s.left() - w - 8 if self.on_right else s.right() + 8
-        y = min(max(s.bottom() - h, area.top() + 8), area.bottom() - h - 8)
-        self.flyout.move(min(max(x, area.left() + 8), area.right() - w - 8), y)
+        self.bar.bridge.toWeb.emit(json.dumps(msg, ensure_ascii=False))
+
+    @staticmethod
+    def pretty_hotkey(combo: str) -> str:
+        parts = [p.strip("<>") for p in str(combo).split("+") if p.strip()]
+        return "+".join(p.capitalize() if len(p) > 1 else p.upper() for p in parts)
+
+    def send_state(self) -> None:
+        sections = []
+        for s in self.sidebar.get("sections", []):
+            d = {"id": s.get("id", ""), "title": s.get("title", ""), "symbol": s.get("symbol", ""),
+                 "hasList": bool(s.get("list")),
+                 "actions": [{"label": a.get("label", "OK"), "symbol": a.get("symbol", "")}
+                             for a in (s.get("actions") or [])]}
+            c = s.get("compose")
+            if c:
+                d["compose"] = {"placeholder": c.get("placeholder", "Start typing"),
+                                "record": bool(c.get("record", True))}
+            sections.append(d)
+        msg = {"type": "state", "platform": "win",
+               "hotkey": self.pretty_hotkey(self.sidebar.get("hotkey", "<ctrl>+<alt>+m")),
+               "api": bool(self.cfg.get("api")),
+               "edge": "right" if self.on_right else "left",
+               "sections": sections,
+               "records": [{"mode": r.get("mode", "audio"), "label": r.get("label", "Record")}
+                           for r in self.sidebar.get("record", [])],
+               "counts": self.counts,
+               "recording": self.recording_dict()}
+        ask_path = self.sidebar.get("ask_path", "/brain/ask")
+        if ask_path and self.cfg.get("api"):
+            msg["ask"] = {"placeholder": self.sidebar.get(
+                "ask_placeholder", "Ask about clients, meetings, decisions")}
+        self.send(msg)
+
+    def recording_dict(self) -> dict:
+        return {"active": self.recorder.is_recording, "mode": self.recorder.mode,
+                "elapsed": self.recorder.elapsed}
+
+    def say(self, text: str) -> None:
+        """An outcome is shown where the click was when the bar is up, and as
+        a notification when it is not."""
+        if self.bar.isVisible() and self.page_ready:
+            self.send({"type": "toast", "text": text})
+        else:
+            self.notify("Maestro", text)
+
+    def from_web(self, m: dict) -> None:
+        t = m.get("type")
+        if t == "ready":
+            self.page_ready = True
+            self.send_state()
+            pending, self.queued = self.queued, []
+            for q in pending:
+                self._to_web(q)
+        elif t == "size":
+            centre = m.get("centre")
+            self.bar.resize_to(int(m.get("width", 600)), int(m.get("height", 86)),
+                               int(centre) if centre is not None else None)
+        elif t == "drag":
+            self.bar.start_drag()
+        elif t == "hide":
+            self.bar.hide()
+        elif t == "focus":
+            self.bar.activateWindow()
+            self.bar.view.setFocus()
+        elif t == "open":
+            self.load_rows(str(m.get("section", "")))
+        elif t == "action":
+            self.perform(str(m.get("section", "")), int(m.get("index", 0)), m.get("id"))
+        elif t == "compose":
+            self.compose(str(m.get("section", "")), str(m.get("text", "")), m.get("id"))
+        elif t == "ask":
+            self.ask(str(m.get("text", "")))
+        elif t == "record":
+            self.toggle_record(str(m.get("mode", "audio")))
+        elif t == "open_url":
+            url = str(m.get("url") or "")
+            if not url:
+                for it in self.cfg.get("items", []) or []:
+                    if it.get("type") == "open" and it.get("url"):
+                        url = it["url"]
+                        break
+            if url:
+                import webbrowser
+                webbrowser.open(url)
+        elif t == "copy":
+            QApplication.clipboard().setText(str(m.get("text", "")))
+
+    # -- data --------------------------------------------------------------
+    def section(self, sid: str) -> dict | None:
+        for s in self.sidebar.get("sections", []):
+            if s.get("id") == sid:
+                return s
+        return None
+
+    def card(self, row: dict, s: dict) -> dict:
+        fields = s.get("fields") or {}
+        return {"id": api.row_id(row),
+                "title": api.field(row, fields.get("title", ["title"])) or "Untitled",
+                "subtitle": api.field(row, fields.get("subtitle", ["client_name"])),
+                "body": api.field(row, fields.get("body", ["detail"]))}
+
+    def load_rows(self, sid: str) -> None:
+        s = self.section(sid)
+        if not s or not s.get("list"):
+            return
+        if not self.cfg.get("api"):
+            self.send({"type": "rows", "section": sid, "rows": []})
+            return
+        self.api.get(s["list"], lambda payload, code:
+                     self.bridge.api_result.emit(payload, code, "rows:" + sid))
 
     def _api_result(self, payload, code, kind):
-        if kind == "list" and self.flyout:
-            self.flyout.took_list(payload, code)
+        if kind.startswith("rows:"):
+            sid = kind[5:]
+            s = self.section(sid)
+            if not s:
+                return
+            raw = api.rows(payload) if code == 200 else []
+            self.rows[sid] = raw
+            self.counts[sid] = len(raw)
+            self.send({"type": "rows", "section": sid, "rows": [self.card(r, s) for r in raw]})
+
+    def find_row(self, sid: str, rid) -> dict | None:
+        if rid is None:
+            return None
+        for r in self.rows.get(sid, []):
+            if api.row_id(r) == str(rid):
+                return r
+        return None
+
+    def perform(self, sid: str, index: int, rid) -> None:
+        s = self.section(sid)
+        actions = (s or {}).get("actions") or []
+        row = self.find_row(sid, rid)
+        if not s or not (0 <= index < len(actions)) or not row:
+            return
+        action = actions[index]
+        if not action.get("path"):
+            return
+        path = api.substitute(action["path"], row)
+        label = action.get("label", "Action")
+        if action.get("advance", True):
+            # The page has already dropped the card. Keep the cache in step.
+            self.rows[sid] = [r for r in self.rows.get(sid, []) if api.row_id(r) != str(rid)]
+            self.counts[sid] = len(self.rows[sid])
+
+        def done(_payload, code):
+            if 200 <= code < 300:
+                if action.get("toast"):
+                    self.say(action["toast"])
+            else:
+                self.say(f"{label} failed ({code or 'no reply'})")
+                self.load_rows(sid)      # the truth comes back from the server
+
+        self.api.call(action.get("method", "POST"), path, action.get("body"), done)
+
+    def compose(self, sid: str, text: str, rid) -> None:
+        s = self.section(sid)
+        c = (s or {}).get("compose") or {}
+        text = text.strip()
+        if not s or not c or not text:
+            return
+        # Not every destination exists as an endpoint yet. Appending to a file
+        # keeps the box useful now, and only the config changes later.
+        if not c.get("path"):
+            target = c.get("file")
+            if not target:
+                return
+            p = config.expand(target)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            with open(p, "a", encoding="utf-8") as fh:
+                fh.write(f"\n## {stamp}\n{text}\n")
+            self.say(c.get("toast", "Captured"))
+            return
+        body = {c.get("field", "text"): text, "section": sid}
+        path = c["path"]
+        row = self.find_row(sid, rid)
+        if row:
+            path = api.substitute(path, row)
+            if api.row_id(row):
+                body["item_id"] = api.row_id(row)
+        if "{" in path:
+            self.say("That box needs a card open")
+            return
+        self.api.post(path, body, lambda _p, code: self.say(
+            c.get("toast", "Sent") if 200 <= code < 300
+            else f"Could not send ({code or 'no reply'})"))
+
+    def ask(self, text: str) -> None:
+        """The Ask box goes to the company brain, which answers with citations."""
+        path = self.sidebar.get("ask_path", "/brain/ask")
+        text = text.strip()
+        if not text:
+            return
+        if not path or not self.cfg.get("api"):
+            self.send({"type": "answer_error", "text": "No API is configured."})
+            return
+
+        def done(payload, code):
+            if 200 <= code < 300 and isinstance(payload, dict):
+                self.send({"type": "answer", "text": payload.get("answer") or "",
+                           "citations": payload.get("citations") or []})
+            else:
+                self.send({"type": "answer_error",
+                           "text": "Maestro did not answer. Check the connection."
+                           if not code else f"The brain answered {code}."})
+
+        self.api.post(path, {"query": text}, done)
 
     def set_count(self, section_id: str, n: int):
         self.counts[section_id] = n
-        self.strip.update()
+        self.send({"type": "counts", "counts": self.counts})
 
     def refresh_counts(self):
         if not self.cfg.get("api"):
@@ -687,35 +712,25 @@ class MaestroBar:
         self.toggle_record("audio")
 
     def recording_changed(self):
-        self.strip.update()
+        self.send({"type": "recording", **self.recording_dict()})
         self.tray.setToolTip("Maestro Bar — recording" if self.recorder.is_recording
                              else "Maestro Bar")
 
     def paint_tick(self):
         if self.recorder.is_recording:
             self.tray.setToolTip(f"Maestro Bar — recording {self.recorder.elapsed}")
-            for b, key in self.strip.buttons:
-                if key == "record:" + self.recorder.mode:
-                    b.setIcon(icon("monitor" if self.recorder.mode == "screen" else "record",
-                                   "#ff453a"))
-        else:
-            for b, key in self.strip.buttons:
-                if key.startswith("record:"):
-                    b.setIcon(icon("monitor" if key.endswith("screen") else "record", FG))
+            self.send({"type": "recording", **self.recording_dict()})
 
     def reload(self):
-        was_visible = self.strip.isVisible()
-        self.close_flyout()
         self.cfg, self.cfg_source = config.load()
         self.sidebar = self.cfg["sidebar"]
         self.api.update(self.cfg.get("api", ""), self.cfg.get("token_service", "maestro-token"))
-        self.strip.close()
-        self.strip = Strip(self)
-        self.place_strip()
-        if was_visible:
-            self.strip.show()
+        self.rows = {}
+        self.counts = {}
+        self.bar.apply_invisibility(bool(self.sidebar.get("invisible", True)))
+        self.send_state()
         self.refresh_counts()
-        self.notify("Maestro", "Config reloaded")
+        self.say("Config reloaded")
 
 
 def main() -> int:
