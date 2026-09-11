@@ -177,9 +177,10 @@ class BarWindow(QWidget):
 
     # -- invisibility, the Windows way ----------------------------------------
     def apply_invisibility(self, on: bool) -> None:
-        """Left out of screen shares and of the app's own screen recording,
-        the way Zoom's overlays are. WDA_EXCLUDEFROMCAPTURE needs Windows 10
-        2004 or newer; older builds simply ignore the call."""
+        """On screen by default, in a share as much as anywhere else. Turned
+        on, this keeps the bar out of capture the way Zoom keeps its own
+        overlays out. WDA_EXCLUDEFROMCAPTURE needs Windows 10 2004 or newer;
+        older builds simply ignore the call."""
         if not sys.platform.startswith("win"):
             return
         try:
@@ -237,7 +238,7 @@ class MaestroBar:
         self.bar = BarWindow(self)
         self.place_bar()
         self.bar.show()
-        self.bar.apply_invisibility(bool(self.sidebar.get("invisible", True)))
+        self.bar.apply_invisibility(bool(self.sidebar.get("invisible", False)))
 
         self.tick = QTimer()
         self.tick.timeout.connect(self.paint_tick)
@@ -725,7 +726,7 @@ class MaestroBar:
         self.api.update(self.cfg.get("api", ""), self.cfg.get("token_service", "maestro-token"))
         self.rows = {}
         self.counts = {}
-        self.bar.apply_invisibility(bool(self.sidebar.get("invisible", True)))
+        self.bar.apply_invisibility(bool(self.sidebar.get("invisible", False)))
         self.send_state()
         self.refresh_counts()
         self.say("Config reloaded")
