@@ -119,9 +119,26 @@ class BarWindow(QWidget):
             print(f"[bar] {index} is missing; nothing to show")
         self.setFixedSize(600, 86)
 
-    def resize_to(self, w: int, h: int) -> None:
-        if w > 0 and h > 0:
-            self.setFixedSize(w, h)
+    def resize_to(self, w: int, h: int, centre: int | None = None) -> None:
+        """The page measures itself and the window follows. The parked edge
+        stays put, so opening the panel grows the window inwards rather than
+        pushing the strip off the screen.
+
+        `centre` is how far down the strip's own middle sits. Until someone
+        drags the bar, that middle is held level with the middle of the screen
+        — the strip's middle, not the window's, which is mostly panel once the
+        panel is open."""
+        if w <= 0 or h <= 0:
+            return
+        area = (self.screen() or QApplication.primaryScreen()).availableGeometry()
+        right, top = self.x() + self.width(), self.y()
+        self.setFixedSize(w, h)
+        x = right - w if self.app.on_right else self.x()
+        if centre is not None and not self.app.placed:
+            top = area.center().y() - centre
+        x = min(max(x, area.left()), area.right() - w + 1)
+        top = min(max(top, area.top()), max(area.top(), area.bottom() - h + 1))
+        self.move(x, top)
 
     # -- dragging: the page cannot move the window, so it asks ---------------
     def start_drag(self) -> None:
@@ -131,7 +148,7 @@ class BarWindow(QWidget):
     def _drag_step(self) -> None:
         if not (QApplication.mouseButtons() & Qt.LeftButton):
             self._drag_timer.stop()
-            config.write_state({"x": self.x(), "y": self.y()})
+            self.snap()
             return
         p = QCursor.pos()
         if self._drag_last is not None:
@@ -139,6 +156,24 @@ class BarWindow(QWidget):
             if d.x() or d.y():
                 self.move(self.pos() + d)
         self._drag_last = p
+
+    def snap(self) -> None:
+        """Dropped anywhere, the bar returns to the nearer edge — the
+        placement it has always had, and the one that leaves the middle of the
+        screen free."""
+        area = (self.screen() or QApplication.primaryScreen()).availableGeometry()
+        f = self.frameGeometry()
+        self.app.on_right = (area.right() - f.right()) <= (f.left() - area.left())
+        x = area.right() - f.width() + 1 if self.app.on_right else area.left()
+        y = min(max(f.top(), area.top()), max(area.top(), area.bottom() - f.height() + 1))
+        self.move(x, y)
+        self.app.placed = True
+        # The anchor is the corner against the parked edge, not the left one:
+        # the window is narrow while folded and wide while open, and only the
+        # parked corner is the same point in both.
+        config.write_state({"anchor": x + f.width() if self.app.on_right else x,
+                            "top": y, "on_right": self.app.on_right})
+        self.app.send({"type": "edge", "edge": "right" if self.app.on_right else "left"})
 
     # -- invisibility, the Windows way ----------------------------------------
     def apply_invisibility(self, on: bool) -> None:
@@ -169,6 +204,8 @@ class MaestroBar:
         self.qt = qt
         self.bridge = Bridge()
         self.counts: dict[str, int] = {}
+        self.on_right = True          # which edge the strip is parked against
+        self.placed = False           # has anyone dragged it themselves yet
         self.rows: dict[str, list[dict]] = {}       # section id → raw rows
         self.page_ready = False
         self.queued: list[dict] = []
@@ -363,16 +400,31 @@ class MaestroBar:
     # -- the window and the page ---------------------------------------
 
     # -- the window --------------------------------------------------------
+    @staticmethod
+    def screen_at_cursor():
+        """The screen the pointer is on, not the one with keyboard focus.
+
+        With two displays, focus put the bar on one screen and the clamp then
+        pulled it to the edge of the other. Where the pointer is is both
+        stable and what someone means by "here"."""
+        return QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+
     def place_bar(self):
         st = config.read_state()
-        screen = QApplication.primaryScreen().availableGeometry()
-        if "x" in st and "y" in st:
-            x, y = int(st["x"]), int(st["y"])
-            if screen.adjusted(-40, -40, 40, 40).contains(QPoint(x, y)):
-                self.bar.move(x, y)
+        area = self.screen_at_cursor().availableGeometry()
+        self.on_right = bool(st.get("on_right", True))
+        self.placed = "anchor" in st and "top" in st
+        if self.placed:
+            anchor, top = int(st["anchor"]), int(st["top"])
+            x = anchor - self.bar.width() if self.on_right else anchor
+            if area.adjusted(-40, -40, 40, 40).contains(QPoint(x, top)):
+                self.bar.move(x, top)
                 return
-        # Top centre, a hair below the top of the screen: where the eye is.
-        self.bar.move(screen.center().x() - self.bar.width() // 2, screen.top() + 4)
+            self.placed = False
+        # The right edge, level with the middle of the screen: where the strip
+        # parked before this, and clear of what is being read.
+        self.bar.move(area.right() - self.bar.width() + 1,
+                      area.center().y() - self.bar.height() // 2)
 
     def toggle_bar(self):
         if self.bar.isVisible():
@@ -414,6 +466,7 @@ class MaestroBar:
         msg = {"type": "state", "platform": "win",
                "hotkey": self.pretty_hotkey(self.sidebar.get("hotkey", "<ctrl>+<alt>+m")),
                "api": bool(self.cfg.get("api")),
+               "edge": "right" if self.on_right else "left",
                "sections": sections,
                "records": [{"mode": r.get("mode", "audio"), "label": r.get("label", "Record")}
                            for r in self.sidebar.get("record", [])],
@@ -446,7 +499,9 @@ class MaestroBar:
             for q in pending:
                 self._to_web(q)
         elif t == "size":
-            self.bar.resize_to(int(m.get("width", 600)), int(m.get("height", 86)))
+            centre = m.get("centre")
+            self.bar.resize_to(int(m.get("width", 600)), int(m.get("height", 86)),
+                               int(centre) if centre is not None else None)
         elif t == "drag":
             self.bar.start_drag()
         elif t == "hide":

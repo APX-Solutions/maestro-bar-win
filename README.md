@@ -1,26 +1,31 @@
 # Maestro Bar for Windows
 
-The same bar as the Mac version. A pill parks at the top of the screen saying
-whether anything is recording; under it a panel holds the review queue, a box
-for capturing a thought, and a box for asking the company brain.
+The same bar as the Mac version. A strip one button wide parks against the
+right edge of the screen, level with the middle; the panel opens beside it,
+holding the review queue, a box for capturing a thought, and a box for asking
+the company brain.
 
 `Ctrl+Alt+M` shows and hides it. There is also a tray icon.
 
 ```
- (:::)  ( M  * Not recording  [mic] [screen]  ^ Hide )  (x)
- +----------------------------------------------------+
- | Review                                  < 1 of 3 > |
- | Follow up on the Ohrid shoot                       |
- | Kupola Media                                       |
- | Hi Marko, thanks for the call this morning ...     |
- | v Done   Dismiss   Send the email                  |
- |                                                    |
- | Review 3 . Capture . Ask                           |
- | +------------------------------------------------+ |
- | | Tell the agent what to change, or Ctrl + to send| |
- | +------------------------------------------------+ |
- +----------------------------------------------------+
+                                          +---+
+   +------------------------------------+ | : |  drag it; it returns to an edge
+   | Review                  <  1 of 3 > | +---+
+   | Follow up on the Ohrid shoot       | | M |  open Maestro
+   | Kupola Media                       | | o |  record audio
+   | Hi Marko, thanks for the call ...  | | # |  record the screen
+   | + Done   Dismiss   Send the email  | | < |  open and close the panel
+   |                                    | +---+
+   | Review 3 . Capture . Ask           | | X |  put it away
+   | +--------------------------------+ | +---+
+   | | Tell the agent what to change  | |  46px
+   | +--------------------------------+ |
+   +------------------------------------+
 ```
+
+Idle, the strip says nothing at all. While a recording runs it shows a timer
+and the button that started it turns red. Dropped anywhere, it returns to the
+nearer edge.
 
 It reads **the same `bar.json`** the Mac app reads, and shows **the same page**:
 `ui/` here is a copy of `MaestroBar/ui` in the Mac repo, made by
