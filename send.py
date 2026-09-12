@@ -165,6 +165,14 @@ def send(path: str | Path, cfg: dict, client: str = "") -> tuple[bool, str]:
         return True, f"{cat}: {(out.get('title') or '')[:90]} — card raised"
     if routed == "meeting":
         return True, f"Brainstorm — {out.get('tasks', 0)} task(s) proposed"
+    if routed == "studio":
+        # Work for Advertisable. The plan is in the bar's Storyboards chip.
+        status = out.get("status")
+        if status == "proposed":
+            return True, f"Plan ready in the bar: {out.get('summary') or 'storyboards'} — press Go"
+        if status == "needs_brand":
+            return True, "Which brand? Open the bar and type it under the card"
+        return True, f"Could not plan that: {out.get('reason') or status}"
     # Read but deliberately not carded. 'other' and a low-confidence verdict are
     # normal answers, not failures, so say which rather than implying a fault.
     return True, f"Read, no card: {out.get('reason') or cat}"

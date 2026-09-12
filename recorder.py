@@ -24,7 +24,7 @@ def _slug(s: str) -> str:
 
 
 class Recorder:
-    def __init__(self, on_change=None, on_message=None):
+    def __init__(self, on_change=None, on_message=None, on_sent=None):
         self.proc: subprocess.Popen | None = None
         self.started_at: dt.datetime | None = None
         self.mode = "audio"
@@ -39,6 +39,7 @@ class Recorder:
         self._retrying = False
         self.on_change = on_change or (lambda: None)
         self.on_message = on_message or (lambda title, body: None)
+        self.on_sent = on_sent or (lambda: None)
 
     @property
     def is_recording(self) -> bool:
@@ -270,6 +271,7 @@ class Recorder:
             self.on_message("Saved", f"{recorded.name}, sending to Maestro")
             threading.Thread(target=self._send, args=(recorded, tag, cfg),
                              daemon=True).start()
+            self.on_sent()
             return
 
         if after:
@@ -278,6 +280,7 @@ class Recorder:
                         .replace("{client}", tag or ""))
             self.on_message("Saved", f"{recorded.name}, processing now")
             subprocess.Popen(cmd, shell=True, creationflags=config.NO_WINDOW)
+            self.on_sent()
         else:
             self.on_message("Saved", recorded.name)
 
