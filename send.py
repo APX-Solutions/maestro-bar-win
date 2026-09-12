@@ -168,8 +168,10 @@ def send(path: str | Path, cfg: dict, client: str = "") -> tuple[bool, str]:
     if routed == "studio":
         # Work for Advertisable. The plan is in the bar's Storyboards chip.
         status = out.get("status")
+        if status == "running":
+            return True, f"On it: {out.get('summary') or 'storyboards'} — the bar shows progress"
         if status == "proposed":
-            return True, f"Plan ready in the bar: {out.get('summary') or 'storyboards'} — press Go"
+            return True, f"Waiting for Go in the bar: {out.get('summary') or 'storyboards'}"
         if status == "needs_brand":
             return True, "Which brand? Open the bar and type it under the card"
         return True, f"Could not plan that: {out.get('reason') or status}"
