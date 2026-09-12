@@ -1,7 +1,7 @@
 # The bar, as designed
 
-One page, shown by both apps. What it is for: recording, the review queue,
-capturing a thought, and asking the company brain — from a strip that stays
+One page, shown by both apps. What it is for: recording, the board, the
+storyboards, capturing a thought, and asking the company brain — from a strip that stays
 out of the way at the top of the screen.
 
 ## Material
@@ -100,3 +100,31 @@ nothing waiting, `?mock&os=win` for Windows key labels.
 
 `mock.js` pretends to be the native side. It is loaded by `index.html` but
 does nothing unless `?mock` is in the URL.
+
+## A card that is still happening
+
+Most cards are a thing waiting for a decision. A Storyboards card is a thing
+in progress, and it says so: a thin bar in the accent colour, the time left
+under it in tabular figures, and one line per step with a dot that is grey
+before, breathing blue during, green after and red if it failed. The link
+sits at the end of the step's line the moment the job exists, because the
+storyboard is watchable long before it is finished.
+
+The section fetches itself again every few seconds while any of its cards is
+live, and stops the moment none is. Nothing else in the bar polls faster than
+the counts.
+
+A recording on its way shows as one line with a pulse above the cards, in the
+section that watches recordings, until its own card arrives. That is the
+whole of the feedback between "stop" and "here is the plan": the bar does not
+open by itself for it.
+
+Five chips do not fit on one row with dots between them, so with five or more
+the dots go and the chips sit closer. The row stays a row.
+
+## What is not in the bar
+
+The sales review queue. The bar goes to people who are not Maestro users —
+a machine token is an identity for recording, not a login — and a queue of
+draft replies to clients is not theirs to read. It is a Maestro page, and
+stays one.
