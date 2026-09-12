@@ -44,6 +44,7 @@ class Bridge(QObject):
     to_web = Signal(object)
     recorder_changed = Signal()
     recorder_message = Signal(str, str)
+    recorder_sent = Signal()
 
 
 # --------------------------------------------------------------------------
@@ -219,11 +220,15 @@ class MaestroBar:
 
         self.recorder = Recorder(
             on_change=self.bridge.recorder_changed.emit,
-            on_message=self.bridge.recorder_message.emit)
+            on_message=self.bridge.recorder_message.emit,
+            on_sent=self.bridge.recorder_sent.emit)
 
         self.bridge.hotkey.connect(self.toggle_bar)
         self.bridge.recorder_changed.connect(self.recording_changed)
         self.bridge.recorder_message.connect(self.notify)
+        # A recording has left for Maestro: the page shows it on its way and
+        # polls the section that watches recordings until its card appears.
+        self.bridge.recorder_sent.connect(lambda: self.send({"type": "sent"}))
         self.bridge.api_result.connect(self._api_result)
         self.bridge.count.connect(self.set_count)
         self.bridge.to_web.connect(self._to_web)
@@ -460,8 +465,11 @@ class MaestroBar:
         for s in self.sidebar.get("sections", []):
             d = {"id": s.get("id", ""), "title": s.get("title", ""), "symbol": s.get("symbol", ""),
                  "hasList": bool(s.get("list")),
-                 "actions": [{"label": a.get("label", "OK"), "symbol": a.get("symbol", "")}
-                             for a in (s.get("actions") or [])]}
+                 "actions": [{"label": a.get("label", "OK"), "symbol": a.get("symbol", ""),
+                              "advance": bool(a.get("advance", True))}
+                             for a in (s.get("actions") or [])],
+                 "live": float(s.get("live_seconds") or 0),
+                 "watch": bool(s.get("watch_recordings", False))}
             c = s.get("compose")
             if c:
                 d["compose"] = {"placeholder": c.get("placeholder", "Start typing"),
@@ -543,12 +551,21 @@ class MaestroBar:
                 return s
         return None
 
+    # A card may say more than its three lines: how far along it is, its
+    # link, its steps, which buttons apply, whether to keep fetching. Passed
+    # through as they are; the page knows what to do with them.
+    CARD_EXTRAS = ("status", "progress", "eta", "url", "steps", "actions", "live")
+
     def card(self, row: dict, s: dict) -> dict:
         fields = s.get("fields") or {}
-        return {"id": api.row_id(row),
-                "title": api.field(row, fields.get("title", ["title"])) or "Untitled",
-                "subtitle": api.field(row, fields.get("subtitle", ["client_name"])),
-                "body": api.field(row, fields.get("body", ["detail"]))}
+        d = {"id": api.row_id(row),
+             "title": api.field(row, fields.get("title", ["title"])) or "Untitled",
+             "subtitle": api.field(row, fields.get("subtitle", ["client_name"])),
+             "body": api.field(row, fields.get("body", ["detail"]))}
+        for k in self.CARD_EXTRAS:
+            if row.get(k) is not None:
+                d[k] = row[k]
+        return d
 
     def load_rows(self, sid: str) -> None:
         s = self.section(sid)
