@@ -94,6 +94,19 @@ def page_url_for(media: Path) -> str:
         return ""
 
 
+def session_id_for(media: Path) -> str:
+    """The session this recording is feedback on, if it is feedback at all.
+
+    Same sidecar reasoning as page_url_for: a recording waits in the queue
+    through failures and restarts, and which branch the person was talking
+    about is not recoverable from the audio."""
+    f = media.with_suffix(media.suffix + ".session")
+    try:
+        return f.read_text(encoding="utf-8-sig").strip() if f.is_file() else ""
+    except OSError:
+        return ""
+
+
 def send(path: str | Path, cfg: dict, client: str = "") -> tuple[bool, str]:
     """Upload the media and have Maestro read it. Returns (ok, message)."""
     p = Path(path)
@@ -144,7 +157,11 @@ def send(path: str | Path, cfg: dict, client: str = "") -> tuple[bool, str]:
     try:
         r = requests.post(f"{base}/recordings/ingest", headers=head,
                           json={"key": key, "kind": kind, "client": client or "",
-                                "page_url": page_url_for(p)},
+                                "page_url": page_url_for(p),
+                                # Set only when this was recorded against a
+                                # session: the backend routes it as feedback on
+                                # that branch instead of filing a new ticket.
+                                "session_id": session_id_for(p)},
                           timeout=TIMEOUT_INGEST)
         r.raise_for_status()
         out = r.json()

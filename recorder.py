@@ -56,7 +56,7 @@ class Recorder:
         self.stop() if self.is_recording else self.start(mode, cfg, client)
 
     def start(self, mode: str, cfg: dict, client: str | None = None,
-              page_url: str = "") -> None:
+              page_url: str = "", session_id: str = "") -> None:
         if self.is_recording:
             return
         exe = config.ffmpeg_path()
@@ -117,6 +117,18 @@ class Recorder:
                 side.write_text(self.page_url, encoding="utf-8")
         except OSError:
             pass  # a note we could not write is not worth losing a recording over
+
+        # The session this recording is FEEDBACK on, kept the same way and for
+        # the same reasons: spoken feedback about a branch is worthless if the
+        # branch it belongs to is lost when an upload retries tomorrow.
+        self.session_id = (session_id or "").strip()
+        try:
+            side = self.file.with_suffix(self.file.suffix + ".session")
+            side.unlink(missing_ok=True)
+            if self.session_id:
+                side.write_text(self.session_id, encoding="utf-8")
+        except OSError:
+            pass
 
         if mode == "screen":
             cmd = [exe, "-hide_banner", "-loglevel", "error",

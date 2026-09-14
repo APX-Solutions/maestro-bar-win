@@ -56,6 +56,7 @@
               actions: [{ label: "Go", advance: false }, { label: "Retry", advance: false }, { label: "Dismiss" }],
               compose: { placeholder: "Change the plan, or ask for more", record: false } },
             { id: "changes", title: "My changes", symbol: "hammer", hasList: true, live: 8,
+              feedback: true,
               actions: [{ label: "Retry", advance: false }], compose: null },
             { id: "capture", title: "Capture", symbol: "square.and.pencil", hasList: false, actions: [],
               compose: { placeholder: "Idea, decision, ticket", record: true } },

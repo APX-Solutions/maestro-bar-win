@@ -473,7 +473,10 @@ class MaestroBar:
                               "advance": bool(a.get("advance", True))}
                              for a in (s.get("actions") or [])],
                  "live": float(s.get("live_seconds") or 0),
-                 "watch": bool(s.get("watch_recordings", False))}
+                 "watch": bool(s.get("watch_recordings", False)),
+                 # Whether a card here can be TALKED BACK to. Only work in
+                 # progress can, so the section says whether it is that kind.
+                 "feedback": bool(s.get("feedback", False))}
             c = s.get("compose")
             if c:
                 d["compose"] = {"placeholder": c.get("placeholder", "Start typing"),
@@ -534,7 +537,8 @@ class MaestroBar:
         elif t == "ask":
             self.ask(str(m.get("text", "")))
         elif t == "record":
-            self.toggle_record(str(m.get("mode", "audio")))
+            self.toggle_record(str(m.get("mode", "audio")),
+                               str(m.get("session", "") or ""))
         elif t == "url_answer":
             mode, self.pending_record = self.pending_record, None
             if mode:
@@ -793,7 +797,7 @@ class MaestroBar:
             return ""
         return clip if clip.lower().startswith(("http://", "https://")) and len(clip) <= 2000 else ""
 
-    def toggle_record(self, mode: str):
+    def toggle_record(self, mode: str, session_id: str = ""):
         """Starting a recording asks one question first: where is this? It used
         to be a dialog in front of everything; now it is the bar's own box,
         which is where the click that started this happened, and it closes the
@@ -803,6 +807,12 @@ class MaestroBar:
         front of someone trying to stop, while the recording keeps rolling."""
         if self.recorder.is_recording:
             self.recorder.stop()
+            return
+        if session_id:
+            # Feedback on a session needs no "where is this?": the session says
+            # what the work is, and asking would put a dialog between someone
+            # and the thing they just clicked Feedback on.
+            self.recorder.start(mode, self.cfg, session_id=session_id)
             return
         if not self.page_ready:
             # No page to ask in yet, so fall back to the dialog.
