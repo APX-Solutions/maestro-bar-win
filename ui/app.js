@@ -52,6 +52,7 @@
     link: I('<path d="M14 4h6v6M20 4l-9 9M18 13v6a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h6"/>'),
     external: I('<path d="M14 4h6v6M20 4l-9 9"/>'),
     film: I('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/>'),
+    hammer: I('<path d="M14.5 5.5l4 4M17 3l4 4-2.5 2.5-4-4z"/><path d="M14.5 9.5L4 20l-1-1L13.5 8.5"/>'),
   };
   // SF Symbol names in bar.json → the drawn set. Unknown names get a spark.
   const symbolIcon = (name = "") => {
@@ -64,6 +65,7 @@
     if (n.includes("display") || n.includes("rectangle")) return icons.screen;
     if (n.includes("record")) return icons.mic;
     if (n.includes("check")) return icons.check;
+    if (n.includes("hammer") || n.includes("wrench") || n.includes("build")) return icons.hammer;
     return icons.spark;
   };
 
