@@ -108,6 +108,7 @@
       },
       {
         "id": "changes",
+        "notify_on_status": true,
         "title": "My changes",
         "symbol": "hammer",
         "list": "/agentic/sessions?mine=true&hours=0&limit=30",

@@ -206,6 +206,10 @@ class MaestroBar:
         self.qt = qt
         self.bridge = Bridge()
         self.counts: dict[str, int] = {}
+        # Per section: row id -> the status it had last time we looked. What
+        # makes "your session is done" possible, and what keeps it from being
+        # said twice.
+        self.seen_status: dict[str, dict[str, str]] = {}
         self.on_right = True          # which edge the strip is parked against
         self.pending_record = None    # the mode waiting on "where is this?"
         self.placed = False           # has anyone dragged it themselves yet
@@ -578,6 +582,20 @@ class MaestroBar:
                      self.bridge.api_result.emit(payload, code, "rows:" + sid))
 
     def _api_result(self, payload, code, kind):
+        if kind.startswith("poll:"):
+            # A background refresh of a section that wants to be told when
+            # something ends. It updates the badge exactly as a count would,
+            # and never pushes rows: the panel may be closed, or the person may
+            # be reading a card, and a poll must not move what they are looking
+            # at. A failed request is left alone rather than treated as "no
+            # rows" — a dropped connection is not a finished job.
+            sid = kind[5:]
+            if code != 200:
+                return
+            raw = api.rows(payload)
+            self._notify_status_changes(sid, raw)
+            self.set_count(sid, len(raw))
+            return
         if kind.startswith("rows:"):
             sid = kind[5:]
             s = self.section(sid)
@@ -586,6 +604,9 @@ class MaestroBar:
             raw = api.rows(payload) if code == 200 else []
             self.rows[sid] = raw
             self.counts[sid] = len(raw)
+            # Keep the baseline in step with what is on screen, so opening a
+            # section does not later announce endings the person just read.
+            self.seen_status[sid] = {api.row_id(r): (r.get("status") or "") for r in raw}
             self.send({"type": "rows", "section": sid, "rows": [self.card(r, s) for r in raw]})
 
     def find_row(self, sid: str, rid) -> dict | None:
@@ -687,8 +708,50 @@ class MaestroBar:
             path, sid = s.get("list"), s.get("id", "")
             if not path:
                 continue
+            if s.get("notify_on_status"):
+                # This section wants to be told when something FINISHES, which
+                # a count cannot express: a run that ends is one row leaving
+                # 'running' and nothing changing shape. So the rows go through
+                # the ordinary result path, which sets the count anyway, and
+                # the statuses are compared there.
+                self.api.get(path, lambda payload, code, sid=sid:
+                             self.bridge.api_result.emit(payload, code, "poll:" + sid))
+                continue
             self.api.get(path, lambda payload, code, sid=sid: self.bridge.count.emit(
                 sid, len(api.rows(payload)) if code == 200 else 0))
+
+    # What a status means when it arrives, and how to say it. Only endings are
+    # worth interrupting someone for: a job moving queued -> running is the
+    # machine getting to it, which nobody asked to be told about.
+    _ENDINGS = {
+        "opened_pr": ("Ready to look at", "opened a pull request"),
+        "no_changes": ("Nothing to change", "the agent found nothing to do"),
+        "failed": ("Failed", "the run did not finish"),
+        "timed_out": ("Timed out", "the run ran out of time"),
+    }
+
+    def _notify_status_changes(self, sid: str, rows: list[dict]) -> None:
+        """Say so when one of this section's rows reaches an end state.
+
+        Compared against what was seen LAST poll, not against a list of things
+        already announced: the first poll after a restart would otherwise
+        announce every finished session at once, which is how a useful
+        notification becomes one people turn off.
+        """
+        before = self.seen_status.get(sid)
+        now = {api.row_id(r): (r.get("status") or "") for r in rows}
+        self.seen_status[sid] = now
+        if before is None:
+            return                      # first sight of this section: baseline only
+        for rid, status in now.items():
+            was = before.get(rid)
+            if was is None or was == status or status not in self._ENDINGS:
+                continue
+            if was in self._ENDINGS:
+                continue                # already ended; this is a correction
+            head, what = self._ENDINGS[status]
+            title = next((r.get("title") for r in rows if api.row_id(r) == rid), "") or "A session"
+            self.notify(f"{head} — {title[:60]}", what)
 
     # -- recording ---------------------------------------------------------
     def ask_page_url(self) -> str:
@@ -771,6 +834,10 @@ class MaestroBar:
         self.api.update(self.cfg.get("api", ""), self.cfg.get("token_service", "maestro-token"))
         self.rows = {}
         self.counts = {}
+        # Dropped with the rest: the next poll re-baselines rather than
+        # announcing every session that finished while the config was being
+        # edited.
+        self.seen_status = {}
         self.bar.apply_invisibility(bool(self.sidebar.get("invisible", False)))
         self.send_state()
         self.refresh_counts()
