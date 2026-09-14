@@ -85,7 +85,7 @@ def rows(payload: Any) -> list[dict]:
         return [r for r in payload if isinstance(r, dict)]
     if isinstance(payload, dict):
         for key in ("items", "data", "results", "rows", "actions", "tasks",
-                    "proposals", "cards"):
+                    "proposals", "cards", "sessions", "previews"):
             v = payload.get(key)
             if isinstance(v, list):
                 return [r for r in v if isinstance(r, dict)]
