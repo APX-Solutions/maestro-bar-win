@@ -439,6 +439,41 @@
       b.onclick = () => bridge.send({ type: "open_url", url: row.url });
       acts.appendChild(b);
     }
+    // Say what is wrong with THIS branch, out loud. A section opts in with
+    // "feedback": true, because only a card that stands for work in progress
+    // has something to be given feedback ON.
+    if (s.feedback) {
+      const b = el("button", "act");
+      b.innerHTML = `${icons.mic}<span>Feedback</span>`;
+      b.title = "Record feedback on this session";
+      b.onclick = () => {
+        // Two ways to say it, and the difference matters: a screen recording
+        // carries what you are pointing AT, which is most of what "this is
+        // wrong" means. So it is asked rather than assumed.
+        if (b.dataset.open) { closeChoice(); return; }
+        const menu = el("div", "fb-choice");
+        [["audio", icons.mic, "Just talk"],
+         ["screen", icons.screen, "Show me"]].forEach(([mode, ico, label]) => {
+          const c = el("button", "fb-opt", `${ico}<span>${label}</span>`);
+          c.onclick = (ev) => {
+            ev.stopPropagation();
+            closeChoice();
+            bridge.send({ type: "record", mode, session: row.id });
+          };
+          menu.appendChild(c);
+        });
+        acts.appendChild(menu);
+        b.dataset.open = "1";
+        function closeChoice() {
+          menu.remove();
+          delete b.dataset.open;
+          document.removeEventListener("click", away, true);
+        }
+        function away(ev) { if (!menu.contains(ev.target) && ev.target !== b) closeChoice(); }
+        setTimeout(() => document.addEventListener("click", away, true), 0);
+      };
+      acts.appendChild(b);
+    }
     if (acts.childElementCount) box.appendChild(acts);
   }
 

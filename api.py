@@ -10,16 +10,40 @@ import json
 import threading
 from typing import Any, Callable
 
+from pathlib import Path
+
 import keyring                      # Windows Credential Manager
 import requests
 
 SERVICE_ACCOUNT = "maestro"
 
+# The other half of the store. "Set API token…" writes the FILE first and
+# always, precisely because Credential Manager can refuse to persist — no
+# Windows backend resolved, a locked-down profile — and the Mac learned the
+# same lesson when a re-signed app lost its Keychain ACL.
+TOKEN_FILE = Path.home() / ".maestro" / "token"
+
 
 def read_token(service: str) -> str | None:
+    """The token, from either store.
+
+    Reading only the vault was a silent outage: a token set on a machine whose
+    keyring does not persist lands in the file alone, and every request then
+    goes out with NO Authorization header at all — _headers() omits it rather
+    than failing — so the API answers 401 and every section of the bar shows
+    "Nothing waiting". Nothing is broken on screen; there is simply no data,
+    which is indistinguishable from an empty queue.
+    """
     try:
-        return keyring.get_password(service, SERVICE_ACCOUNT)
+        tok = keyring.get_password(service, SERVICE_ACCOUNT)
+        if tok and tok.strip():
+            return tok.strip()
     except Exception:               # noqa: BLE001 — a broken vault must not crash the app
+        pass
+    try:
+        tok = TOKEN_FILE.read_text(encoding="utf-8").strip()
+        return tok or None
+    except OSError:
         return None
 
 
