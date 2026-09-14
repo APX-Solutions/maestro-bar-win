@@ -82,6 +82,7 @@
     counts: {},
     active: null,          // section id, or ASK
     rows: {},              // section id → [{id,title,subtitle,body}]
+    rowsAt: {},            // section id → when those rows arrived, so a stale list is refetched
     index: {},             // section id → current card
     loading: {},           // section id → true while the list is on its way
     thread: [],            // ask: [{role:'user'|'assistant', text, citations, error}]
@@ -142,6 +143,7 @@
         const heldId = before ? (before[state.index[m.section] || 0] || {}).id : null;
         const rows = m.rows || [];
         state.rows[m.section] = rows;
+        state.rowsAt[m.section] = Date.now();
         const j = heldId ? rows.findIndex((r) => r.id === heldId) : -1;
         state.index[m.section] = j >= 0 ? j : Math.min(state.index[m.section] || 0, Math.max(0, rows.length - 1));
         state.loading[m.section] = false;
@@ -216,14 +218,23 @@
     return rows[i] || null;
   };
 
+  // How long a section's rows are worth reusing. Opening a section used to
+  // fetch ONCE, ever: rows were kept until the app restarted, so a card went on
+  // showing what it said hours ago — a finished run still "running", a body the
+  // server has since learned to send differently. Anything older than this is
+  // refetched on the way in; anything newer is shown at once, so flicking
+  // between chips stays instant.
+  const ROWS_STALE_MS = 20000;
+
   function loadActive() {
     const s = activeSection();
     if (!s || !s.hasList) return;
-    if (state.rows[s.id] === undefined && !state.loading[s.id]) {
-      state.loading[s.id] = true;
-      bridge.send({ type: "open", section: s.id });
-      renderContent();
-    }
+    if (state.loading[s.id]) return;
+    const age = Date.now() - (state.rowsAt[s.id] || 0);
+    if (state.rows[s.id] !== undefined && age < ROWS_STALE_MS) return;
+    state.loading[s.id] = state.rows[s.id] === undefined;   // spinner only when there is nothing to show
+    bridge.send({ type: "open", section: s.id });
+    renderContent();
   }
 
   function setActive(id) {

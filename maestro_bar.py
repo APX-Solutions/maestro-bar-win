@@ -373,6 +373,10 @@ class MaestroBar:
         mic = config.microphone_allowed()
         mic_text = {True: "allowed", False: "BLOCKED in Windows settings"}.get(mic, "unknown")
         lines = [
+            # First, because it is the answer to "is the fix in?" — and because
+            # every other line is worth doubting if the code is not the code
+            # you think it is.
+            f"Version: {config.version()}",
             f"Config: {self.cfg_source}",
             f"API: {self.cfg.get('api') or 'not set'}",
             # The FILE is what the upload uses, so report it first. A token that
