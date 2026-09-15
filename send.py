@@ -94,6 +94,20 @@ def page_url_for(media: Path) -> str:
         return ""
 
 
+def note_for(media: Path) -> str:
+    """What the person typed when they sent it, kept beside the media.
+
+    Same sidecar reasoning as page_url_for: the queue is a list of paths, and a
+    note that lived only in memory would be gone by the time a failed upload
+    retried. For a screenshot this is the whole ask — a picture says where, not
+    what is wrong with it."""
+    f = media.with_suffix(media.suffix + ".note")
+    try:
+        return f.read_text(encoding="utf-8-sig").strip() if f.is_file() else ""
+    except OSError:
+        return ""
+
+
 def session_id_for(media: Path) -> str:
     """The session this recording is feedback on, if it is feedback at all.
 
@@ -122,7 +136,16 @@ def send(path: str | Path, cfg: dict, client: str = "") -> tuple[bool, str]:
         return False, "no token yet — the recording is kept and will retry"
 
     head = {"Authorization": f"Bearer {tok}"}
-    kind = "screen" if p.suffix.lower() in (".mp4", ".mov", ".mkv") else "audio"
+    ext = p.suffix.lower()
+    # A screenshot is its own kind. It must not be called "screen": that means
+    # a screen RECORDING downstream, and the backend samples video frames for
+    # one.
+    if ext in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        kind = "screenshot"
+    elif ext in (".mp4", ".mov", ".mkv"):
+        kind = "screen"
+    else:
+        kind = "audio"
     ctype = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
 
     # 1. ask for a place to put it
@@ -161,7 +184,8 @@ def send(path: str | Path, cfg: dict, client: str = "") -> tuple[bool, str]:
                                 # Set only when this was recorded against a
                                 # session: the backend routes it as feedback on
                                 # that branch instead of filing a new ticket.
-                                "session_id": session_id_for(p)},
+                                "session_id": session_id_for(p),
+                                "note": note_for(p)},
                           timeout=TIMEOUT_INGEST)
         r.raise_for_status()
         out = r.json()

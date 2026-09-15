@@ -16,6 +16,36 @@ import sys
 from pathlib import Path
 
 APP_DIR = Path(os.environ.get("APPDATA", Path.home())) / "Maestro"
+
+# The version is the CODE, not a number someone remembers to raise.
+#
+# Files here are copied into place by hand as often as they are installed, so a
+# constant would say whatever it said the last time anyone thought about it —
+# and "is the fix in?" is exactly the question it needs to answer. Hashing what
+# is actually on disk cannot lie: two machines showing the same short hash are
+# running the same bar, and a hash that did not change after an install means
+# the install did not land.
+_VERSIONED = ("maestro_bar.py", "api.py", "send.py", "recorder.py",
+              "config.py", "ui/app.js", "ui/app.css", "ui/index.html")
+
+
+def version() -> str:
+    """A short hash of the running code, and the newest file's date."""
+    import hashlib
+    from datetime import datetime
+
+    here = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    h = hashlib.sha256()
+    newest = 0.0
+    for name in _VERSIONED:
+        f = here / name
+        try:
+            h.update(f.read_bytes())
+            newest = max(newest, f.stat().st_mtime)
+        except OSError:
+            h.update(b"?")          # a missing file is itself a version
+    when = datetime.fromtimestamp(newest).strftime("%Y-%m-%d %H:%M") if newest else "?"
+    return f"{h.hexdigest()[:8]} ({when})"
 CONFIG_PATH = APP_DIR / "bar.json"
 STATE_PATH = APP_DIR / "state.json"
 
