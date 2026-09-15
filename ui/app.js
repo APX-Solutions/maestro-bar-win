@@ -53,6 +53,7 @@
     external: I('<path d="M14 4h6v6M20 4l-9 9"/>'),
     film: I('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/>'),
     hammer: I('<path d="M14.5 5.5l4 4M17 3l4 4-2.5 2.5-4-4z"/><path d="M14.5 9.5L4 20l-1-1L13.5 8.5"/>'),
+    camera: I('<path d="M3 8.5A1.5 1.5 0 014.5 7h2L8 5h8l1.5 2h2A1.5 1.5 0 0121 8.5v9A1.5 1.5 0 0119.5 19h-15A1.5 1.5 0 013 17.5z"/><circle cx="12" cy="12.5" r="3.2"/>'),
   };
   // SF Symbol names in bar.json → the drawn set. Unknown names get a spark.
   const symbolIcon = (name = "") => {
@@ -77,6 +78,8 @@
     api: true,
     sections: [],          // [{id,title,symbol,hasList,actions:[{label,symbol}],compose:{placeholder,record}|null}]
     records: [],           // [{mode,label}]
+    snip: true,            // show the screenshot button
+    snipHint: "",          // its hot key, when there is one
     ask: null,             // {placeholder} when the brain can be asked
     recording: { active: false, mode: "", elapsed: "" },
     counts: {},
@@ -124,6 +127,8 @@
         state.api = m.api !== false;
         state.sections = m.sections || [];
         state.records = m.records || [];
+        state.snip = m.snip !== false;       // the camera on the strip
+        state.snipHint = m.snipHint || "";
         state.ask = m.ask || null;
         state.counts = m.counts || {};
         if (m.recording) state.recording = m.recording;
@@ -320,6 +325,27 @@
 
     const acts = $("#pillActions");
     acts.innerHTML = "";
+    // Above the recorders on purpose: a screenshot is the cheapest thing on
+    // the strip — no permission, no waiting, no watching yourself talk — and
+    // it is the only one that can report something already gone.
+    if (state.snip) {
+      const b = el("button", "pbtn");
+      b.title = "Screenshot a region" + (state.snipHint ? " — " + state.snipHint : "");
+      b.setAttribute("aria-label", b.title);
+      b.innerHTML = icons.camera;
+      b.onclick = () => {
+        // Whatever is typed in the box goes WITH the picture and is then
+        // cleared, because it has been sent. A screenshot says where; the
+        // words say what is wrong with it.
+        const input = $("#input");
+        const note = input && !state.askUrl ? input.value.trim() : "";
+        if (input && note) { input.value = ""; autosize(); }
+        const row = current();
+        bridge.send({ type: "snip", note,
+                      session: row && activeSection() && activeSection().feedback ? row.id : "" });
+      };
+      acts.appendChild(b);
+    }
     for (const rec of state.records) {
       const b = el("button", "pbtn rec");
       const live = r.active && r.mode === rec.mode;

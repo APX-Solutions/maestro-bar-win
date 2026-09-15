@@ -493,6 +493,9 @@ class MaestroBar:
                "sections": sections,
                "records": [{"mode": r.get("mode", "audio"), "label": r.get("label", "Record")}
                            for r in self.sidebar.get("record", [])],
+               # Off with "snip": false, for a machine where grabbing the screen
+               # is not wanted at all.
+               "snip": bool(self.sidebar.get("snip", True)),
                "counts": self.counts,
                "recording": self.recording_dict()}
         ask_path = self.sidebar.get("ask_path", "/brain/ask")
@@ -543,6 +546,9 @@ class MaestroBar:
         elif t == "record":
             self.toggle_record(str(m.get("mode", "audio")),
                                str(m.get("session", "") or ""))
+        elif t == "snip":
+            self.take_screenshot(str(m.get("note", "") or ""),
+                                 str(m.get("session", "") or ""))
         elif t == "url_answer":
             mode, self.pending_record = self.pending_record, None
             if mode:
@@ -800,6 +806,55 @@ class MaestroBar:
         except Exception:  # noqa: BLE001 — no clipboard is not a reason to refuse
             return ""
         return clip if clip.lower().startswith(("http://", "https://")) and len(clip) <= 2000 else ""
+
+    def take_screenshot(self, note: str = "", session_id: str = "") -> None:
+        """Pick a region of the screen and send it, the way a recording is sent.
+
+        A screenshot answers a different question from a recording: not "watch
+        me reproduce this" but "look at THIS". It is also the only way to
+        report something that has already happened and cannot be re-enacted —
+        an error that flashed, a layout that is wrong right now.
+
+        The typed note is the ask. A picture says where, not what is wrong with
+        it, so the words that came with it are what the model is told to read;
+        without them it is asked to judge the picture alone and to say so
+        rather than invent a bug.
+        """
+        import snip
+
+        # The bar itself must not be in the shot. It sits on top of everything
+        # by design, and a picture of the thing you are reporting FROM is not
+        # the thing you are reporting. processEvents() so it is really gone
+        # before the pixels are grabbed rather than merely asked to go.
+        self.bar.hide()
+        QApplication.processEvents()
+        try:
+            path = snip.grab(config.expand(self.cfg.get("out_dir", "~/Recordings")),
+                             name="screenshot")
+        finally:
+            self.bar.show()
+
+        if not path:
+            return                     # cancelled: Esc, right-click, or no drag
+
+        p = Path(path)
+        # Beside the file, for the same reason the page URL is: a failed upload
+        # retries from the queue later, possibly after a restart, and the words
+        # that explain the picture must still be there when it does.
+        for suffix, value in ((".note", note.strip()), (".session", session_id.strip())):
+            if not value:
+                continue
+            try:
+                p.with_suffix(p.suffix + suffix).write_text(value, encoding="utf-8")
+            except OSError:
+                pass
+
+        # On a thread, the way a finished recording is sent: the upload waits on
+        # S3 and then on Maestro reading the image, and neither should freeze
+        # the bar. _send reports through the same toast either way.
+        self.say("Sending the screenshot…")
+        threading.Thread(target=self.recorder._send,
+                         args=(p, "", self.cfg), daemon=True).start()
 
     def toggle_record(self, mode: str, session_id: str = ""):
         """Starting a recording asks one question first: where is this? It used
