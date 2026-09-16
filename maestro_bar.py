@@ -214,6 +214,7 @@ class MaestroBar:
         self.pending_record = None    # the mode waiting on "where is this?"
         self.placed = False           # has anyone dragged it themselves yet
         self.rows: dict[str, list[dict]] = {}       # section id → raw rows
+        self.user = ""                # whose token this is, once /me has said
         self.page_ready = False
         self.queued: list[dict] = []
 
@@ -258,7 +259,19 @@ class MaestroBar:
         self.counts_timer.timeout.connect(self.refresh_counts)
         self.counts_timer.start(max(20, int(self.sidebar.get("refresh_seconds", 90))) * 1000)
         self.refresh_counts()
+        self.whoami()
         self.install_hotkey()
+
+    def whoami(self) -> None:
+        """Ask Maestro whose token this is. The page decides what that person
+        may see — the chevron and the panel behind it are not for everyone —
+        so the answer goes to it with the rest of the state. No API, a bad
+        token, or no network all mean "nobody", which is the safe answer."""
+        self.user = ""
+        if not self.cfg.get("api"):
+            return
+        self.api.get("/me", lambda payload, code:
+                     self.bridge.api_result.emit(payload, code, "me"))
 
     # -- tray --------------------------------------------------------------
     def open_logs(self) -> None:
@@ -486,7 +499,7 @@ class MaestroBar:
                 d["compose"] = {"placeholder": c.get("placeholder", "Start typing"),
                                 "record": bool(c.get("record", True))}
             sections.append(d)
-        msg = {"type": "state", "platform": "win",
+        msg = {"type": "state", "platform": "win", "user": self.user,
                "hotkey": self.pretty_hotkey(self.sidebar.get("hotkey", "<ctrl>+<alt>+m")),
                "api": bool(self.cfg.get("api")),
                "edge": "right" if self.on_right else "left",
@@ -596,6 +609,11 @@ class MaestroBar:
                      self.bridge.api_result.emit(payload, code, "rows:" + sid))
 
     def _api_result(self, payload, code, kind):
+        if kind == "me":
+            self.user = (str(payload.get("username") or "").strip().lower()
+                         if code == 200 and isinstance(payload, dict) else "")
+            self.send_state()
+            return
         if kind.startswith("poll:"):
             # A background refresh of a section that wants to be told when
             # something ends. It updates the badge exactly as a count would,
@@ -910,6 +928,7 @@ class MaestroBar:
         self.bar.apply_invisibility(bool(self.sidebar.get("invisible", False)))
         self.send_state()
         self.refresh_counts()
+        self.whoami()
         self.say("Config reloaded")
 
 
