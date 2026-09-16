@@ -132,10 +132,25 @@ def grab(out_dir: str | Path, name: str = "screenshot") -> str | None:
         loop.exec()
     overlays.clear()
 
-    pixmap = result.get("pixmap")
+    return _save(result.get("pixmap"), out_dir, name)
+
+
+def grab_full(out_dir: str | Path, screen=None, name: str = "screenshot") -> str | None:
+    """The whole of one screen, no drag. Returns the PNG's path, or None.
+
+    One screen, not all of them stitched: the thing worth showing is on the
+    screen the pointer is on, and a picture of three monitors is mostly a
+    picture of two that do not matter.
+    """
+    screen = screen or QGuiApplication.primaryScreen()
+    if screen is None:
+        return None
+    return _save(screen.grabWindow(0), out_dir, name)
+
+
+def _save(pixmap, out_dir: str | Path, name: str) -> str | None:
     if pixmap is None or pixmap.isNull():
         return None
-
     out = Path(out_dir).expanduser()
     out.mkdir(parents=True, exist_ok=True)
     from datetime import datetime
