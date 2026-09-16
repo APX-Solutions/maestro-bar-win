@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (QApplication, QInputDialog, QLineEdit, QMenu,
 
 import api
 import config
-from icons import icon
+from icons import brand, icon
 from recorder import Recorder
 
 
@@ -237,7 +237,7 @@ class MaestroBar:
         self.bridge.count.connect(self.set_count)
         self.bridge.to_web.connect(self._to_web)
 
-        self.tray = QSystemTrayIcon(icon("tray", "#d0d0d0", 32))
+        self.tray = QSystemTrayIcon(brand())
         self.tray.setToolTip("Maestro Bar")
         self.tray.setContextMenu(self.build_tray_menu())
         self.tray.activated.connect(
@@ -916,6 +916,10 @@ class MaestroBar:
 def main() -> int:
     qt = QApplication(sys.argv)
     qt.setQuitOnLastWindowClosed(False)     # a tray app outlives its windows
+    # Windows takes the taskbar, Alt-Tab and Start menu icon from here. Without
+    # it the app shows whatever pythonw.exe shows, which is how "Maestro Bar"
+    # turns up in Start looking like a stray Python script.
+    qt.setWindowIcon(brand())
     if not QSystemTrayIcon.isSystemTrayAvailable():
         QMessageBox.critical(None, "Maestro Bar", "This needs a system tray.")
         return 1

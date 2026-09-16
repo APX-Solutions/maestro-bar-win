@@ -26,8 +26,10 @@ if not exist vendor\ffmpeg.exe (
 .venv\Scripts\pyinstaller ^
   --noconfirm --clean --onefile --windowed ^
   --name MaestroBar ^
+  --icon assets\maestro.ico ^
   --add-data "bar.json;." ^
   --add-data "ui;ui" ^
+  --add-data "assets;assets" ^
   --add-binary "vendor\ffmpeg.exe;." ^
   --hidden-import keyring.backends.Windows ^
   --hidden-import PySide6.QtWebEngineWidgets ^

@@ -29,6 +29,29 @@ _SVG = {
 _FILLED = {"record"}
 
 
+def brand(size: int = 0) -> "QIcon":
+    """The Maestro mark, for anywhere Windows shows the APP rather than a
+    control: the tray, the taskbar, Alt-Tab, the Start menu.
+
+    A real file rather than a drawn path, because this one is artwork and not a
+    glyph — and a multi-size .ico so Windows picks per context instead of
+    squeezing one big bitmap down to 16px, which turns thin line art to mush.
+
+    Falls back to the drawn tray glyph if the file is missing, so a partial
+    install still has something in the tray to click.
+    """
+    from pathlib import Path
+    import config
+
+    for name in ("assets/maestro.ico", "assets/brand-mark-256.png"):
+        f = Path(config.bundled(name))
+        if f.is_file():
+            ic = QIcon(str(f))
+            if not ic.isNull():
+                return ic
+    return icon("tray", "#d0d0d0", size or 32)
+
+
 def icon(name: str, color: str = "#e8e8e8", size: int = 22) -> QIcon:
     path = _SVG.get(name, _SVG["tray"])
     fill = color if name in _FILLED else "none"
