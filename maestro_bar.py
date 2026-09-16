@@ -212,6 +212,7 @@ class MaestroBar:
         self.seen_status: dict[str, dict[str, str]] = {}
         self.on_right = True          # which edge the strip is parked against
         self.pending_record = None    # the mode waiting on "where is this?"
+        self.pending_snip = None      # {"path", "session"}: a shot waiting on its words
         self.placed = False           # has anyone dragged it themselves yet
         self.rows: dict[str, list[dict]] = {}       # section id → raw rows
         self.user = ""                # whose token this is, once /me has said
@@ -560,8 +561,12 @@ class MaestroBar:
             self.toggle_record(str(m.get("mode", "audio")),
                                str(m.get("session", "") or ""))
         elif t == "snip":
-            self.take_screenshot(str(m.get("note", "") or ""),
+            self.take_screenshot(str(m.get("mode", "region") or "region"),
                                  str(m.get("session", "") or ""))
+        elif t == "snip_note":
+            self.send_screenshot(str(m.get("note", "") or ""))
+        elif t == "snip_discard":
+            self.discard_screenshot()
         elif t == "url_answer":
             mode, self.pending_record = self.pending_record, None
             if mode:
@@ -825,20 +830,26 @@ class MaestroBar:
             return ""
         return clip if clip.lower().startswith(("http://", "https://")) and len(clip) <= 2000 else ""
 
-    def take_screenshot(self, note: str = "", session_id: str = "") -> None:
-        """Pick a region of the screen and send it, the way a recording is sent.
+    def take_screenshot(self, mode: str = "region", session_id: str = "") -> None:
+        """Take the picture first; ask what it shows after.
 
         A screenshot answers a different question from a recording: not "watch
         me reproduce this" but "look at THIS". It is also the only way to
         report something that has already happened and cannot be re-enacted —
         an error that flashed, a layout that is wrong right now.
 
-        The typed note is the ask. A picture says where, not what is wrong with
-        it, so the words that came with it are what the model is told to read;
-        without them it is asked to judge the picture alone and to say so
-        rather than invent a bug.
+        The order matters. Asking first put the bar between the person and
+        the thing they were about to point at, and made them describe a
+        picture that did not exist yet. So: grab, then bring the bar back
+        with the box open, and hold the file until the words arrive
+        (`snip_note`) or the person changes their mind (`snip_discard`).
+
+        `mode` is "region" — drag a box — or "full", the screen the pointer
+        is on, no drag.
         """
         import snip
+
+        self.discard_screenshot()      # a shot nobody answered is not kept
 
         # The bar itself must not be in the shot. It sits on top of everything
         # by design, and a picture of the thing you are reporting FROM is not
@@ -846,20 +857,46 @@ class MaestroBar:
         # before the pixels are grabbed rather than merely asked to go.
         self.bar.hide()
         QApplication.processEvents()
+        out_dir = config.expand(self.cfg.get("out_dir", "~/Recordings"))
         try:
-            path = snip.grab(config.expand(self.cfg.get("out_dir", "~/Recordings")),
-                             name="screenshot")
+            if mode == "full":
+                path = snip.grab_full(out_dir, screen=self.screen_at_cursor(), name="screenshot")
+            else:
+                path = snip.grab(out_dir, name="screenshot")
         finally:
             self.bar.show()
 
         if not path:
+            self.send({"type": "snip_taken", "ok": False})
             return                     # cancelled: Esc, right-click, or no drag
 
-        p = Path(path)
+        self.pending_snip = {"path": path, "session": session_id.strip()}
+        # The question is asked in the bar, so the bar has to be in front and
+        # able to take the keyboard — the shot just took both away from it.
+        self.bar.raise_()
+        self.bar.activateWindow()
+        self.send({"type": "snip_taken", "ok": True,
+                   "session": session_id.strip(), "full": mode == "full"})
+
+    def send_screenshot(self, note: str = "") -> None:
+        """The words arrived; the picture goes, the way a recording is sent.
+
+        The typed note is the ask. A picture says where, not what is wrong with
+        it, so the words that came with it are what the model is told to read;
+        without them it is asked to judge the picture alone and to say so
+        rather than invent a bug.
+        """
+        pending, self.pending_snip = self.pending_snip, None
+        if not pending:
+            return
+        p = Path(pending["path"])
+        if not p.is_file():
+            self.say("The screenshot is gone")
+            return
         # Beside the file, for the same reason the page URL is: a failed upload
         # retries from the queue later, possibly after a restart, and the words
         # that explain the picture must still be there when it does.
-        for suffix, value in ((".note", note.strip()), (".session", session_id.strip())):
+        for suffix, value in ((".note", note.strip()), (".session", pending["session"])):
             if not value:
                 continue
             try:
@@ -873,6 +910,17 @@ class MaestroBar:
         self.say("Sending the screenshot…")
         threading.Thread(target=self.recorder._send,
                          args=(p, "", self.cfg), daemon=True).start()
+
+    def discard_screenshot(self) -> None:
+        """Never mind: the file goes too, so a shot nobody sent does not sit in
+        the recordings folder looking like one that failed to upload."""
+        pending, self.pending_snip = self.pending_snip, None
+        if not pending:
+            return
+        try:
+            Path(pending["path"]).unlink()
+        except OSError:
+            pass
 
     def toggle_record(self, mode: str, session_id: str = ""):
         """Starting a recording asks one question first: where is this? It used
