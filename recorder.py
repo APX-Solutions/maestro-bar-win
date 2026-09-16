@@ -118,9 +118,9 @@ class Recorder:
         except OSError:
             pass  # a note we could not write is not worth losing a recording over
 
-        # What was typed alongside the link, if anything: the same one line
-        # answers "where is this?" and "what is wrong?", and the words half of
-        # it rides beside the media the way the link half does.
+        # What was typed in the bar, whole: a link, what is wrong, or both.
+        # Maestro finds the address in it; here it only rides beside the media
+        # the way the URL from the old dialog does.
         try:
             side = self.file.with_suffix(self.file.suffix + ".note")
             side.unlink(missing_ok=True)
