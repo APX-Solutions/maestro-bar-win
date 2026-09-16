@@ -141,6 +141,12 @@ try {
     $sc.Arguments        = 'maestro_bar.py'
     $sc.WorkingDirectory = $dest
     $sc.Description      = 'Maestro Bar'
+    # Without this the shortcut wears its TARGET's icon, and the target is
+    # pythonw.exe — so searching "Maestro" in Start offered something that
+    # looked like a stray Python script. The tray gets its icon from the app at
+    # runtime; a shortcut is a file and has to be told.
+    $ico = Join-Path $dest 'assets\maestro.ico'
+    if (Test-Path $ico) { $sc.IconLocation = "$ico,0" }
     $sc.Save()
   }
   Write-Host "  Added to Start, and starts automatically when you log in."
