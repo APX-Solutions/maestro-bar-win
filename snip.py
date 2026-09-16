@@ -20,15 +20,60 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QRect, Qt
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import QPoint, QPropertyAnimation, QRect, Qt
+from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPen
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+
+
+_TOOLBAR_CSS = """
+QWidget#snipbar { background: rgba(28, 30, 36, 235); border: 1px solid rgba(255,255,255,40);
+                  border-radius: 12px; }
+QLabel { color: rgba(255,255,255,150); font-size: 12px; padding: 0 8px; }
+QPushButton { color: #fff; background: transparent; border: 1px solid transparent;
+              border-radius: 8px; padding: 6px 12px; font-size: 12px; }
+QPushButton:hover { background: rgba(255,255,255,24); }
+QPushButton[active="true"] { background: #2f6df6; }
+"""
+
+
+class _Toolbar(QWidget):
+    """The pill at the top of the screen, the way the Windows snipping tool
+    has one: which kind of shot this is, and how to get out. Drawn on the
+    screen the pointer is on, because that is where the eyes are."""
+
+    def __init__(self, parent: "_Overlay", on_full):
+        super().__init__(parent)
+        self.setObjectName("snipbar")
+        # A bare QWidget paints no background of its own, stylesheet or not,
+        # until told that the stylesheet is the one painting it.
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet(_TOOLBAR_CSS)
+        self.setCursor(Qt.ArrowCursor)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(6, 6, 6, 6)
+        lay.setSpacing(4)
+        region = QPushButton("Region")
+        region.setProperty("active", "true")
+        region.setToolTip("Drag a box around what to show")
+        region.setFocusPolicy(Qt.NoFocus)
+        full = QPushButton("Full screen")
+        full.setToolTip("The whole of this screen, no drag")
+        full.setFocusPolicy(Qt.NoFocus)
+        full.clicked.connect(on_full)
+        lay.addWidget(region)
+        lay.addWidget(full)
+        lay.addWidget(QLabel("Drag to select  ·  Esc to cancel"))
+        self.adjustSize()
+
+    def place(self, area: QRect) -> None:
+        self.adjustSize()
+        self.move(area.x() + (area.width() - self.width()) // 2, area.y() + 18)
 
 
 class _Overlay(QWidget):
     """One monitor's worth of dimmed screen, with a hole where the drag is."""
 
-    def __init__(self, screen, on_done):
+    def __init__(self, screen, on_done, with_toolbar: bool = False):
         super().__init__()
         self._on_done = on_done
         self._origin: QPoint | None = None
@@ -44,6 +89,12 @@ class _Overlay(QWidget):
         # would capture the dimming, and on a multi-monitor setup the other
         # overlays too.
         self._shot = screen.grabWindow(0)
+        self._toolbar = None
+        if with_toolbar:
+            # Full screen from here is the same pixels, already in hand: the
+            # whole grab, untouched by the dimming.
+            self._toolbar = _Toolbar(self, lambda: self._on_done(self._shot))
+            self._toolbar.place(self.rect())
 
     def paintEvent(self, _event):
         p = QPainter(self)
@@ -96,12 +147,14 @@ def grab(out_dir: str | Path, name: str = "screenshot") -> str | None:
     """Let the person pick a region. Returns the PNG's path, or None.
 
     Covers every monitor, because the thing worth showing is rarely on the one
-    the toolbar happens to be parked on.
+    the toolbar happens to be parked on. The pill with "Region · Full screen"
+    sits on the screen the pointer is on.
     """
     from PySide6.QtCore import QEventLoop
     result: dict = {}
     overlays: list[_Overlay] = []
     loop = QEventLoop()
+    here = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
 
     def done(pixmap):
         # Guarded: every monitor has an overlay and any of them can answer, so
@@ -117,7 +170,7 @@ def grab(out_dir: str | Path, name: str = "screenshot") -> str | None:
         loop.quit()
 
     for screen in QGuiApplication.screens():
-        o = _Overlay(screen, done)
+        o = _Overlay(screen, done, with_toolbar=(screen is here))
         overlays.append(o)
     for o in overlays:
         o.show()
@@ -132,7 +185,10 @@ def grab(out_dir: str | Path, name: str = "screenshot") -> str | None:
         loop.exec()
     overlays.clear()
 
-    return _save(result.get("pixmap"), out_dir, name)
+    pixmap = result.get("pixmap")
+    if pixmap is not None and not pixmap.isNull():
+        flash(here)
+    return _save(pixmap, out_dir, name)
 
 
 def grab_full(out_dir: str | Path, screen=None, name: str = "screenshot") -> str | None:
@@ -145,7 +201,9 @@ def grab_full(out_dir: str | Path, screen=None, name: str = "screenshot") -> str
     screen = screen or QGuiApplication.primaryScreen()
     if screen is None:
         return None
-    return _save(screen.grabWindow(0), out_dir, name)
+    shot = screen.grabWindow(0)
+    flash(screen)
+    return _save(shot, out_dir, name)
 
 
 def _save(pixmap, out_dir: str | Path, name: str) -> str | None:
@@ -156,3 +214,39 @@ def _save(pixmap, out_dir: str | Path, name: str) -> str | None:
     from datetime import datetime
     path = out / f"{name}-{datetime.now():%Y%m%d-%H%M%S}.png"
     return str(path) if pixmap.save(str(path), "PNG") else None
+
+
+def flash(screen) -> None:
+    """A white blink over one screen, gone in a quarter of a second.
+
+    A full-screen shot has no drag and no crosshair, so without this nothing
+    visibly happens between the click and the bar coming back — and a thing
+    that gives no sign of working gets clicked again. The blink is what every
+    camera does, and it costs nothing: one frameless window fading out."""
+    if screen is None:
+        return
+    w = QWidget()
+    w.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
+                     | Qt.WindowTransparentForInput)
+    w.setStyleSheet("background: white;")
+    w.setGeometry(screen.geometry())
+    w.setWindowOpacity(0.85)
+    w.show()
+    anim = QPropertyAnimation(w, b"windowOpacity", w)
+    anim.setDuration(260)
+    anim.setStartValue(0.85)
+    anim.setEndValue(0.0)
+    # A top-level widget with no parent lives exactly as long as its Python
+    # reference, and this function returns before the fade has begun. Held
+    # here until the animation lets go of it.
+    _flashes.append(w)
+
+    def gone():
+        w.close()
+        if w in _flashes:
+            _flashes.remove(w)
+    anim.finished.connect(gone)
+    anim.start()
+
+
+_flashes: list = []
