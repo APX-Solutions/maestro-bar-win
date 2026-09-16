@@ -564,13 +564,14 @@ class MaestroBar:
             self.take_screenshot(str(m.get("mode", "region") or "region"),
                                  str(m.get("session", "") or ""))
         elif t == "snip_note":
-            self.send_screenshot(str(m.get("note", "") or ""))
+            self.send_screenshot(str(m.get("text") or m.get("note") or ""))
         elif t == "snip_discard":
             self.discard_screenshot()
         elif t == "url_answer":
             mode, self.pending_record = self.pending_record, None
             if mode:
-                self.recorder.start(mode, self.cfg, page_url=str(m.get("url") or ""))
+                url, note = split_ask(str(m.get("text") or m.get("url") or ""))
+                self.recorder.start(mode, self.cfg, page_url=url, note=note)
         elif t == "open_url":
             # Citations, and nothing else: the page never asks for a bare URL.
             url = str(m.get("url") or "")
@@ -878,13 +879,14 @@ class MaestroBar:
         self.send({"type": "snip_taken", "ok": True,
                    "session": session_id.strip(), "full": mode == "full"})
 
-    def send_screenshot(self, note: str = "") -> None:
+    def send_screenshot(self, text: str = "") -> None:
         """The words arrived; the picture goes, the way a recording is sent.
 
-        The typed note is the ask. A picture says where, not what is wrong with
-        it, so the words that came with it are what the model is told to read;
-        without them it is asked to judge the picture alone and to say so
-        rather than invent a bug.
+        One line came back: a link to the page, what is wrong, or both. The
+        link half says where; the words half is the ask. A picture says where,
+        not what is wrong with it, so the words are what the model is told to
+        read; without them it is asked to judge the picture alone and to say
+        so rather than invent a bug.
         """
         pending, self.pending_snip = self.pending_snip, None
         if not pending:
@@ -893,10 +895,11 @@ class MaestroBar:
         if not p.is_file():
             self.say("The screenshot is gone")
             return
-        # Beside the file, for the same reason the page URL is: a failed upload
+        url, note = split_ask(text)
+        # Beside the file, the way a recording keeps them: a failed upload
         # retries from the queue later, possibly after a restart, and the words
         # that explain the picture must still be there when it does.
-        for suffix, value in ((".note", note.strip()), (".session", pending["session"])):
+        for suffix, value in ((".url", url), (".note", note), (".session", pending["session"])):
             if not value:
                 continue
             try:
@@ -978,6 +981,27 @@ class MaestroBar:
         self.refresh_counts()
         self.whoami()
         self.say("Config reloaded")
+
+
+def split_ask(text: str) -> tuple[str, str]:
+    """One line into its two halves: the first web address in it, and the
+    rest as the note.
+
+    The box asks for a link, a description, or both, and people answer in
+    one breath — "https://app/x the save button does nothing". Maestro wants
+    them apart: the address is looked up, the words are read. Splitting here
+    rather than in the page keeps the page ignorant of what Maestro stores.
+    Trailing punctuation is peeled off the address, since "…/settings, the
+    toggle" is a sentence and not a path.
+    """
+    words = (text or "").split()
+    url, rest = "", []
+    for w in words:
+        if not url and w.lower().startswith(("http://", "https://")):
+            url = w.rstrip(".,;:!?)]}\'\"")
+            continue                   # the peeled comma is not worth keeping
+        rest.append(w)
+    return url, " ".join(rest).strip()
 
 
 def main() -> int:
