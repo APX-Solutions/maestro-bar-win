@@ -193,12 +193,14 @@ def send(path: str | Path, cfg: dict, client: str = "") -> tuple[bool, str]:
         _queue(cfg, p)
         return False, f"Maestro could not read it ({str(e)[:60]}) — recording kept"
 
-    # Read, so the note has served its purpose. Left behind it would attach the
-    # wrong page to nothing in particular and clutter the folder.
-    try:
-        p.with_suffix(p.suffix + ".url").unlink(missing_ok=True)
-    except OSError:
-        pass
+    # Read, so the sidecars have served their purpose. Left behind they would
+    # attach the wrong page, note or session to nothing in particular and
+    # clutter the folder. All three, the way send.sh on the Mac clears them.
+    for suffix in (".url", ".note", ".session"):
+        try:
+            p.with_suffix(p.suffix + suffix).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     routed = out.get("routed")
     cat = out.get("category") or "?"

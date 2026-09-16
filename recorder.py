@@ -56,7 +56,7 @@ class Recorder:
         self.stop() if self.is_recording else self.start(mode, cfg, client)
 
     def start(self, mode: str, cfg: dict, client: str | None = None,
-              page_url: str = "", session_id: str = "") -> None:
+              page_url: str = "", session_id: str = "", note: str = "") -> None:
         if self.is_recording:
             return
         exe = config.ffmpeg_path()
@@ -117,6 +117,17 @@ class Recorder:
                 side.write_text(self.page_url, encoding="utf-8")
         except OSError:
             pass  # a note we could not write is not worth losing a recording over
+
+        # What was typed in the bar, whole: a link, what is wrong, or both.
+        # Maestro finds the address in it; here it only rides beside the media
+        # the way the URL from the old dialog does.
+        try:
+            side = self.file.with_suffix(self.file.suffix + ".note")
+            side.unlink(missing_ok=True)
+            if (note or "").strip():
+                side.write_text(note.strip(), encoding="utf-8")
+        except OSError:
+            pass
 
         # The session this recording is FEEDBACK on, kept the same way and for
         # the same reasons: spoken feedback about a branch is worthless if the

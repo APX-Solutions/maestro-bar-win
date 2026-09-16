@@ -564,13 +564,16 @@ class MaestroBar:
             self.take_screenshot(str(m.get("mode", "region") or "region"),
                                  str(m.get("session", "") or ""))
         elif t == "snip_note":
-            self.send_screenshot(str(m.get("note", "") or ""))
+            self.send_screenshot(str(m.get("text") or m.get("note") or ""))
         elif t == "snip_discard":
             self.discard_screenshot()
         elif t == "url_answer":
             mode, self.pending_record = self.pending_record, None
             if mode:
-                self.recorder.start(mode, self.cfg, page_url=str(m.get("url") or ""))
+                # The line goes whole, as the note. Maestro reads it and finds
+                # the address in it if there is one; the bar does not guess.
+                self.recorder.start(mode, self.cfg,
+                                    note=str(m.get("text") or m.get("url") or ""))
         elif t == "open_url":
             # Citations, and nothing else: the page never asks for a bare URL.
             url = str(m.get("url") or "")
@@ -878,13 +881,15 @@ class MaestroBar:
         self.send({"type": "snip_taken", "ok": True,
                    "session": session_id.strip(), "full": mode == "full"})
 
-    def send_screenshot(self, note: str = "") -> None:
+    def send_screenshot(self, text: str = "") -> None:
         """The words arrived; the picture goes, the way a recording is sent.
 
-        The typed note is the ask. A picture says where, not what is wrong with
-        it, so the words that came with it are what the model is told to read;
-        without them it is asked to judge the picture alone and to say so
-        rather than invent a bug.
+        One line came back: a link to the page, what is wrong, or both. It
+        goes whole, as the note — Maestro reads it and finds the address in
+        it if there is one; the bar does not guess. A picture says where, not
+        what is wrong with it, so the words are what the model is told to
+        read; without them it is asked to judge the picture alone and to say
+        so rather than invent a bug.
         """
         pending, self.pending_snip = self.pending_snip, None
         if not pending:
@@ -893,10 +898,10 @@ class MaestroBar:
         if not p.is_file():
             self.say("The screenshot is gone")
             return
-        # Beside the file, for the same reason the page URL is: a failed upload
+        # Beside the file, the way a recording keeps them: a failed upload
         # retries from the queue later, possibly after a restart, and the words
         # that explain the picture must still be there when it does.
-        for suffix, value in ((".note", note.strip()), (".session", pending["session"])):
+        for suffix, value in ((".note", text.strip()), (".session", pending["session"])):
             if not value:
                 continue
             try:
