@@ -76,6 +76,12 @@
           text: "Kupola Media asked for a two-day shoot in Ohrid with a drone unit [1]. Marko confirmed the 12th and 13th are open on their side [2], and the last quote sent was 4,800 EUR excluding travel [3].",
           citations: [{ n: 1, source: "gmail", title: "Re: Ohrid shoot — quote v2", url: "https://mail.google.com" }, { n: 2, source: "meeting", title: "Call with Marko, 3 Sep", url: "" }, { n: 3, source: "slack", title: "#sales · quote thread", url: "https://slack.com" }] }), 1100);
         break;
+      case "snip":
+        // The real app hides the bar and hands over to the region picker. In
+        // the browser there is nothing to grab, so just say what was sent —
+        // enough to see that the note and the Skip both arrive.
+        send({ type: "toast", text: m.note ? `Screenshot + "${m.note}"` : "Screenshot, no note" });
+        break;
       case "record":
         // The app asks where the recording is before it starts one, so this
         // does too.
