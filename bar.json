@@ -1,5 +1,5 @@
 {
-  "api": "https://maestro-agent.duckdns.org",
+  "api": "https://maestro-api.advertisable.ai",
   "token_service": "maestro-token",
   "audio_device": "",
   "out_dir": "~/Recordings",
