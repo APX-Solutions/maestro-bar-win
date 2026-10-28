@@ -573,7 +573,8 @@ class MaestroBar:
                 # The line goes whole, as the note. Maestro reads it and finds
                 # the address in it if there is one; the bar does not guess.
                 self.recorder.start(mode, self.cfg,
-                                    note=str(m.get("text") or m.get("url") or ""))
+                                    note=str(m.get("text") or m.get("url") or ""),
+                                    monitor=getattr(self, "record_monitor", None))
         elif t == "open_url":
             # Citations, and nothing else: the page never asks for a bare URL.
             url = str(m.get("url") or "")
@@ -938,15 +939,25 @@ class MaestroBar:
         if self.recorder.is_recording:
             self.recorder.stop()
             return
+        # Which screen, before anything else: with two, the recording used to
+        # take whichever one Windows chose. Esc on the picker is "never mind".
+        self.record_monitor = None
+        if mode == "screen":
+            import snip
+            go, self.record_monitor = snip.pick_screen()
+            if not go:
+                return
         if session_id:
             # Feedback on a session needs no "where is this?": the session says
             # what the work is, and asking would put a dialog between someone
             # and the thing they just clicked Feedback on.
-            self.recorder.start(mode, self.cfg, session_id=session_id)
+            self.recorder.start(mode, self.cfg, session_id=session_id,
+                                monitor=self.record_monitor)
             return
         if not self.page_ready:
             # No page to ask in yet, so fall back to the dialog.
-            self.recorder.start(mode, self.cfg, page_url=self.ask_page_url())
+            self.recorder.start(mode, self.cfg, page_url=self.ask_page_url(),
+                                monitor=self.record_monitor)
             return
         self.pending_record = mode
         if not self.bar.isVisible():
