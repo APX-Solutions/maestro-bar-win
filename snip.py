@@ -206,6 +206,109 @@ def grab_full(out_dir: str | Path, screen=None, name: str = "screenshot") -> str
     return _save(shot, out_dir, name)
 
 
+class _ScreenChoice(QWidget):
+    """One monitor, dimmed, saying "Record this screen". Brighter with an
+    outline while the pointer is on it, so it is plain which one a click takes."""
+
+    def __init__(self, screen, number: int, on_done):
+        super().__init__()
+        self._on_done = on_done
+        self._number = number
+        self._hover = False
+        self.setScreen(screen)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMouseTracking(True)
+        self.setGeometry(screen.geometry())
+
+    def enterEvent(self, _e):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, _e):
+        self._hover = False
+        self.update()
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.fillRect(self.rect(), QColor(0, 0, 0, 70 if self._hover else 150))
+        if self._hover:
+            p.setPen(QPen(QColor(47, 109, 246), 6))
+            p.drawRect(self.rect().adjusted(3, 3, -3, -3))
+        # The label in the middle: which display, and what a click does.
+        box = QRect(0, 0, 420, 150)
+        box.moveCenter(self.rect().center())
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(28, 30, 36, 235))
+        p.drawRoundedRect(box, 16, 16)
+        f = p.font()
+        f.setPixelSize(30)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QColor(255, 255, 255))
+        p.drawText(box.adjusted(0, 22, 0, -70), Qt.AlignCenter, "Record this screen")
+        f.setPixelSize(18)
+        f.setBold(False)
+        p.setFont(f)
+        p.setPen(QColor(255, 255, 255, 170))
+        p.drawText(box.adjusted(0, 80, 0, -20), Qt.AlignCenter,
+                   f"Display {self._number}  ·  Esc to cancel")
+
+    def mousePressEvent(self, e):
+        # Right-click is cancel, as on the snip overlay.
+        self._on_done(e.button() == Qt.LeftButton)
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape:
+            self._on_done(False)
+
+
+def pick_screen() -> tuple[bool, dict | None]:
+    """Which monitor a screen recording takes. Returns (go, monitor).
+
+    With two screens the recording used to take whichever Windows chose, and
+    sometimes it was the wrong one, so Record asks every time: each monitor
+    dims and says "Record this screen", and a click on one picks it. Esc or a
+    right-click returns (False, None) and nothing is recorded.
+
+    One monitor needs no question: (True, None), the whole desktop, which is
+    that screen. The monitor comes from where the pointer is at the click, in
+    Windows' own physical pixels — the ones gdigrab's offsets use, which Qt's
+    scaled geometry is not on a 150% display.
+    """
+    import config
+    from PySide6.QtCore import QEventLoop
+    screens = QGuiApplication.screens()
+    if len(screens) < 2:
+        return True, None
+    result: dict = {}
+    overlays: list[_ScreenChoice] = []
+    loop = QEventLoop()
+
+    def done(go: bool):
+        if "go" in result:
+            return
+        result["go"] = go
+        # Read before the overlays close: the pointer is still on the screen
+        # that was clicked.
+        result["monitor"] = config.monitor_at_cursor() if go else None
+        for o in overlays:
+            o.close()
+        loop.quit()
+
+    for i, screen in enumerate(screens):
+        overlays.append(_ScreenChoice(screen, i + 1, done))
+    for o in overlays:
+        o.show()
+        o.raise_()
+    overlays[0].activateWindow()
+    loop.exec()
+    overlays.clear()
+    return bool(result.get("go")), result.get("monitor")
+
+
 def _save(pixmap, out_dir: str | Path, name: str) -> str | None:
     if pixmap is None or pixmap.isNull():
         return None

@@ -293,3 +293,62 @@ def open_microphone_settings() -> None:
     except Exception:  # noqa: BLE001
         subprocess.Popen(["cmd", "/c", "start", "", MIC_SETTINGS_URI],
                          creationflags=NO_WINDOW)
+
+
+# -- which screen a recording takes ---------------------------------------
+#
+# gdigrab's "desktop" is every monitor stitched into one wide frame, so on two
+# screens each comes out half-size and the one that matters is hard to read.
+# A recording takes ONE monitor, the one clicked in the picker that Record
+# shows when more than one is connected.
+#
+# Coordinates are physical pixels. Qt makes the process per-monitor DPI aware,
+# so Win32 answers in the same pixels gdigrab's offsets are measured in — which
+# Qt's own (scaled) screen geometry is not, on a 150% display.
+
+def monitors() -> list[dict]:
+    r"""Every monitor: {name, x, y, w, h}, name being the Windows device (\\.\DISPLAY2)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class MONITORINFOEXW(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                    ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD),
+                    ("szDevice", wintypes.WCHAR * 32)]
+
+    out: list[dict] = []
+    user32 = ctypes.windll.user32
+    proc_t = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC,
+                                ctypes.POINTER(wintypes.RECT), wintypes.LPARAM)
+
+    def each(hmon, _hdc, _rect, _lp):
+        info = MONITORINFOEXW()
+        info.cbSize = ctypes.sizeof(info)
+        if user32.GetMonitorInfoW(hmon, ctypes.byref(info)):
+            r = info.rcMonitor
+            out.append({"name": info.szDevice, "x": r.left, "y": r.top,
+                        "w": r.right - r.left, "h": r.bottom - r.top})
+        return True
+
+    try:
+        user32.EnumDisplayMonitors(None, None, proc_t(each), 0)
+    except Exception:  # noqa: BLE001 — no list means record the whole desktop
+        return []
+    return out
+
+
+def monitor_at_cursor() -> dict | None:
+    """The monitor under the pointer, in physical pixels — asked at the moment
+    the picker is clicked, so the pointer is on the screen that was chosen.
+    None means record the whole desktop: too much, but never the wrong one."""
+    import ctypes
+    from ctypes import wintypes
+    pt = wintypes.POINT()
+    try:
+        if not ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+    return next((m for m in monitors()
+                 if m["x"] <= pt.x < m["x"] + m["w"] and m["y"] <= pt.y < m["y"] + m["h"]),
+                None)

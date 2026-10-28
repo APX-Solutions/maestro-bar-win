@@ -56,7 +56,11 @@ class Recorder:
         self.stop() if self.is_recording else self.start(mode, cfg, client)
 
     def start(self, mode: str, cfg: dict, client: str | None = None,
-              page_url: str = "", session_id: str = "", note: str = "") -> None:
+              page_url: str = "", session_id: str = "", note: str = "",
+              monitor: dict | None = None) -> None:
+        """`monitor` is the one screen to record ({x, y, w, h} in physical
+        pixels, from config.monitor_at_cursor); None records the whole
+        desktop, every monitor in one frame."""
         if self.is_recording:
             return
         exe = config.ffmpeg_path()
@@ -143,7 +147,12 @@ class Recorder:
 
         if mode == "screen":
             cmd = [exe, "-hide_banner", "-loglevel", "error",
-                   "-f", "gdigrab", "-framerate", "15", "-i", "desktop"]
+                   "-f", "gdigrab", "-framerate", "15"]
+            if monitor:
+                # Even sizes: libx264 with yuv420p refuses odd ones.
+                cmd += ["-offset_x", str(monitor["x"]), "-offset_y", str(monitor["y"]),
+                        "-video_size", f"{monitor['w'] // 2 * 2}x{monitor['h'] // 2 * 2}"]
+            cmd += ["-i", "desktop"]
             if device:
                 cmd += ["-f", "dshow", "-i", f"audio={device}"]
             cmd += ["-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
@@ -179,6 +188,7 @@ class Recorder:
             return
 
         self.mode, self.client, self.cfg = mode, client, cfg
+        self.monitor = monitor
         self.started_at = dt.datetime.now()
         self.on_change()
         threading.Thread(target=self._wait, daemon=True).start()
@@ -237,6 +247,7 @@ class Recorder:
             pass
 
         mode, client, cfg = self.mode, self.client, self.cfg
+        monitor = getattr(self, "monitor", None)
         self.proc = self.file = self.started_at = None
         self.on_change()
 
@@ -247,7 +258,7 @@ class Recorder:
             try:
                 cfg2 = dict(cfg or {})
                 cfg2["audio_device"] = "-"        # sentinel: skip audio entirely
-                self.start(mode, client, cfg2)
+                self.start(mode, cfg2, client, monitor=monitor)
             finally:
                 self._retrying = False
             return

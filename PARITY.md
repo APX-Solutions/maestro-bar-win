@@ -10,6 +10,7 @@ are deliberate rather than missing work.
 | --- | --- | --- |
 | record audio | ffmpeg · avfoundation | ffmpeg · dshow |
 | record screen + audio | `screencapture -v -g` | ffmpeg · gdigrab + dshow |
+| which screen (2+ displays) | click-a-screen picker → `screencapture -D` | click-a-screen picker → gdigrab offset + size |
 | ffmpeg | **bundled** in the .app | **bundled** in the .exe |
 | what gets sent | the media itself | the media itself |
 | endpoint | `/recordings/upload-url` → S3 → `/recordings/ingest` | same |
